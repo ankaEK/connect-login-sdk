@@ -26,46 +26,63 @@ class ConnectPersonaAuth {
   final AppLinks _appLinks;
   StreamSubscription<Uri>? _linkSubscription;
 
-  Future<String> signIn({VoidCallback? onExternalAppLaunched}) async {
+  Future<bool> openAuthorizeScreen({VoidCallback? onExternalAppLaunched}) async {
     final appUri = _buildAppUri();
 
-    await _linkSubscription?.cancel();
-    final completer = Completer<String>();
-
-    _linkSubscription = _appLinks.uriLinkStream.listen(
-      (uri) => _handleRedirect(uri, completer),
-      onError: (Object err) {
-        if (!completer.isCompleted) {
-          completer.completeError(
-            ConnectAuthException(
-              ConnectAuthException.invalidResponse,
-              'Redirect listener error: $err',
-            ),
-          );
-        }
-      },
-    );
+    unawaited(_linkSubscription?.cancel());
+    _linkSubscription = null;
 
     bool launched = false;
     try {
       launched = await launchUrl(appUri, mode: LaunchMode.externalApplication);
-      // ignore: avoid_print
-      print('DEBUG_LAUNCH_RESULT: $launched');
-    } catch (e) {
-      // ignore: avoid_print
-      print('DEBUG_LAUNCH_THREW: $e');
+    } catch (_) {
       launched = false;
     }
 
+    if (!launched) return false;
+
+    onExternalAppLaunched?.call();
+    return true;
+  }
+
+  Future<String> signIn({
+    VoidCallback? onExternalAppLaunched,
+    bool listenForRedirect = true,
+  }) async {
+    final launched = await openAuthorizeScreen(
+      onExternalAppLaunched: onExternalAppLaunched,
+    );
+
     if (!launched) {
-      await _linkSubscription?.cancel();
       throw const ConnectAuthException(
         ConnectAuthException.appNotAvailable,
         'Could not open the Connect Persona app',
       );
     }
 
-    onExternalAppLaunched?.call();
+    return _waitForAuthorizationCode(listenForRedirect: listenForRedirect);
+  }
+
+  Future<String> _waitForAuthorizationCode({
+    required bool listenForRedirect,
+  }) async {
+    final completer = Completer<String>();
+
+    if (listenForRedirect) {
+      _linkSubscription = _appLinks.uriLinkStream.listen(
+        (uri) => _handleRedirect(uri, completer),
+        onError: (Object err) {
+          if (!completer.isCompleted) {
+            completer.completeError(
+              ConnectAuthException(
+                ConnectAuthException.invalidResponse,
+                'Redirect listener error: $err',
+              ),
+            );
+          }
+        },
+      );
+    }
 
     final lifecycleListener = AppLifecycleListener(
       onResume: () {
@@ -83,7 +100,7 @@ class ConnectPersonaAuth {
       );
     } finally {
       lifecycleListener.dispose();
-      await _linkSubscription?.cancel();
+      unawaited(_linkSubscription?.cancel());
       _linkSubscription = null;
     }
   }
@@ -152,7 +169,7 @@ class ConnectPersonaAuth {
   }
 
   Future<void> dispose() async {
-    await _linkSubscription?.cancel();
+    unawaited(_linkSubscription?.cancel());
     _linkSubscription = null;
   }
 }
