@@ -1,39 +1,67 @@
-<!--
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# login_with_connect
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages).
+Flutter package for signing in with **Connect Persona** using deep-link OAuth.
 
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages).
--->
-
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+It launches the Connect Persona app, waits for the redirect, and returns an authorization code your app can exchange on the backend.
 
 ## Features
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
+- Launch Connect Persona authorize flow (`connectpersona://oauth/authorize`)
+- Listen for the OAuth redirect deep link
+- Recover the pending link when the host app resumes
+- Typed errors via `ConnectAuthException`
 
 ## Getting started
 
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+1. Add the dependency:
+
+```yaml
+dependencies:
+  login_with_connect:
+    path: ../login_with_connect # or your git / hosted source
+```
+
+2. Register your app’s redirect URI scheme (iOS URL types / Android intent filters) so Connect Persona can return to your app.
+
+3. Configure Connect Persona with matching `client_id` and `redirect_uri`.
 
 ## Usage
 
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder.
+```dart
+import 'package:login_with_connect/login_with_connect.dart';
+
+final auth = ConnectPersonaAuth(
+  clientId: 'your-client-id',
+  redirectUri: 'yourapp://oauth/callback',
+  scope: 'profile.basic',
+);
+
+try {
+  final code = await auth.signIn(
+    onExternalAppLaunched: () {
+      // Optional: show “Waiting for Connect Persona…” UI
+    },
+  );
+  // Send `code` to your backend to exchange for tokens.
+} on ConnectAuthException catch (e) {
+  // e.code: access_denied | cancelled | timeout | app_not_available | invalid_response
+} finally {
+  await auth.dispose();
+}
+```
+
+Launch only (without waiting for a code):
 
 ```dart
-const like = 'sample';
+final opened = await auth.openAuthorizeScreen();
 ```
+
+## Platform setup notes
+
+- **Android / iOS:** deep links must match `redirectUri`.
+- The Connect Persona app must be installed for `signIn` to succeed.
+- Never exchange the authorization code in the client with a secret; do that on your server.
 
 ## Additional information
 
-TODO: Tell users more about the package: where to find more information, how to
-contribute to the package, how to file issues, what response they can expect
-from the package authors, and more.
+Report issues to your Connect Persona / SDK maintainers. Call `dispose()` when you are done with an auth instance.
