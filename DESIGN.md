@@ -32,3 +32,9 @@ app deep link.
 - User cancel in web session → `cancelled` when detectable
 - App launched but no redirect before `signInTimeout` → `timeout`
 - Unrelated deep links while waiting are ignored
+
+## Example app
+`example/` is a minimal host demo: one Sign In button, status / auth code /
+errors. Hardcoded `ConnectEnvironment.uat` (stg) and redirect
+`loginwithconnect://oauth/callback` (wired on Android and iOS). Client ID is a
+placeholder — replace before running.

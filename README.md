@@ -100,6 +100,11 @@ final opened = await auth.openAuthorizeScreen();
 - Never exchange the authorization code in the client with a secret; do that
   on your server.
 
+## Example
+
+See the [`example/`](example/) app for a minimal demo. Set `kClientId` in
+`example/lib/main.dart` before running.
+
 ## Additional information
 
 See [DESIGN.md](DESIGN.md) for routing and env vs product-param decisions.
