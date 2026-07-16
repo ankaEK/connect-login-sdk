@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/widgets.dart';
@@ -8,10 +9,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'connect_auth_exception.dart';
 import 'connect_environment.dart';
 
-/// Opens Connect Persona (app first, then web) and returns an authorization code.
-///
-/// Hosts typically only map Flutter flavor → [environment], call [signIn],
-/// then exchange the returned code on their backend.
+void _log(String message) {
+  developer.log(message, name: 'ConnectPersonaAuth');
+}
+
 class ConnectPersonaAuth {
   ConnectPersonaAuth({
     required this.clientId,
@@ -20,16 +21,22 @@ class ConnectPersonaAuth {
     this.scope = 'profile.basic',
     this.webAuthorizeBaseUrl,
     this.signInTimeout = const Duration(minutes: 5),
+    this.launchHandoffTimeout = const Duration(milliseconds: 1200),
     AppLinks? appLinks,
     Future<bool> Function(Uri uri, {LaunchMode mode})? launchUrlFn,
+    Future<bool> Function(Uri uri)? canLaunchUrlFn,
+    Future<bool> Function(Duration timeout)? waitForAppBackgroundFn,
     WebAuthorizeOpener? webAuthorizeOpener,
-  })  : _appLinks = appLinks ?? AppLinks(),
-        _launchUrl = launchUrlFn ??
-            ((uri, {mode = LaunchMode.platformDefault}) =>
-                launchUrl(uri, mode: mode)),
-        _webAuthorizeOpener = webAuthorizeOpener ?? _defaultWebAuthorizeOpener;
+  }) : _appLinks = appLinks ?? AppLinks(),
+       _launchUrl =
+           launchUrlFn ??
+           ((uri, {mode = LaunchMode.platformDefault}) =>
+               launchUrl(uri, mode: mode)),
+       _canLaunchUrl = canLaunchUrlFn ?? canLaunchUrl,
+       _waitForAppBackground =
+           waitForAppBackgroundFn ?? _defaultWaitForAppBackground,
+       _webAuthorizeOpener = webAuthorizeOpener ?? _defaultWebAuthorizeOpener;
 
-  /// OAuth reserved keys that [webQueryParams] must not override.
   static const reservedOAuthKeys = {
     'client_id',
     'redirect_uri',
@@ -50,8 +57,13 @@ class ConnectPersonaAuth {
 
   final Duration signInTimeout;
 
+  /// How long to wait after launchUrl for the host to background (Connect opened).
+  final Duration launchHandoffTimeout;
+
   final AppLinks _appLinks;
   final Future<bool> Function(Uri uri, {LaunchMode mode}) _launchUrl;
+  final Future<bool> Function(Uri uri) _canLaunchUrl;
+  final Future<bool> Function(Duration timeout) _waitForAppBackground;
   final WebAuthorizeOpener _webAuthorizeOpener;
 
   StreamSubscription<Uri>? _linkSubscription;
@@ -65,10 +77,6 @@ class ConnectPersonaAuth {
     return environment.authorizeBaseUri;
   }
 
-  /// Builds the HTTPS authorize URL for web fallback.
-  ///
-  /// Merge order: base query → oauth defaults → [webQueryParams]
-  /// (reserved oauth keys in [webQueryParams] are ignored).
   Uri buildWebAuthorizeUri({
     Uri? webAuthorizeUrl,
     Map<String, String>? webQueryParams,
@@ -92,38 +100,79 @@ class ConnectPersonaAuth {
     return base.replace(queryParameters: params);
   }
 
-  /// Launches the Connect Persona authorize screen without waiting for a code.
-  Future<bool> openAuthorizeScreen({VoidCallback? onExternalAppLaunched}) async {
+  Future<bool> openAuthorizeScreen({
+    VoidCallback? onExternalAppLaunched,
+    void Function(String reason)? onAppLaunchFailed,
+  }) async {
     final appUri = _buildAppUri();
+    _log('Trying Connect app: $appUri');
 
     unawaited(_linkSubscription?.cancel());
     _linkSubscription = null;
+
+    try {
+      final canLaunch = await _canLaunchUrl(appUri);
+      _log('canLaunchUrl($appUri) => $canLaunch');
+      if (!canLaunch) {
+        _log(
+          'canLaunchUrl=false; still attempting launchUrl '
+          '(Android package visibility can be unreliable)',
+        );
+      }
+    } catch (e) {
+      _log('canLaunchUrl threw ($e); still attempting launchUrl');
+    }
 
     bool launched = false;
     try {
       launched = await _launchUrl(
         appUri,
-        mode: LaunchMode.externalApplication,
-      );
-    } catch (_) {
+        mode: LaunchMode.externalNonBrowserApplication,
+      ).timeout(const Duration(seconds: 5), onTimeout: () => false);
+      _log('launchUrl(externalNonBrowserApplication) => $launched');
+
+      if (!launched) {
+        launched = await _launchUrl(
+          appUri,
+          mode: LaunchMode.externalApplication,
+        ).timeout(const Duration(seconds: 5), onTimeout: () => false);
+        _log('launchUrl(externalApplication) => $launched');
+      }
+    } catch (e) {
+      _log('launchUrl threw: $e');
       launched = false;
     }
 
-    if (!launched) return false;
+    if (!launched) {
+      const reason = 'launchUrl failed for connectpersona://';
+      _log(reason);
+      onAppLaunchFailed?.call(reason);
+      return false;
+    }
 
+    final handedOff = await _waitForAppBackground(launchHandoffTimeout);
+    _log(
+      'app background handoff within ${launchHandoffTimeout.inMilliseconds}ms '
+      '=> $handedOff',
+    );
+    if (!handedOff) {
+      final reason =
+          'no app background within ${launchHandoffTimeout.inMilliseconds}ms '
+          '(Connect did not take foreground)';
+      _log(reason);
+      onAppLaunchFailed?.call(reason);
+      return false;
+    }
+
+    _log('Connect app path succeeded');
     onExternalAppLaunched?.call();
     return true;
   }
 
-  /// Signs in via Connect Persona app when available, otherwise web authorize.
-  ///
-  /// [webQueryParams] are merged into the HTTPS web URL only (e.g. role, signup).
-  /// They are not applied to the native app deep link.
-  ///
-  /// [onOpenWebAuthorize] is an optional escape hatch (e.g. host WebView).
-  /// When omitted, the SDK opens a system auth session via flutter_web_auth_2.
   Future<String> signIn({
     VoidCallback? onExternalAppLaunched,
+    void Function(String reason)? onAppLaunchFailed,
+    VoidCallback? onFellBackToWeb,
     bool listenForRedirect = true,
     Map<String, String>? webQueryParams,
     Uri? webAuthorizeUrl,
@@ -131,12 +180,15 @@ class ConnectPersonaAuth {
   }) async {
     final launched = await openAuthorizeScreen(
       onExternalAppLaunched: onExternalAppLaunched,
+      onAppLaunchFailed: onAppLaunchFailed,
     );
 
     if (launched) {
       return _waitForAuthorizationCode(listenForRedirect: listenForRedirect);
     }
 
+    _log('Falling back to web authorize');
+    onFellBackToWeb?.call();
     return _signInWithWeb(
       webQueryParams: webQueryParams,
       webAuthorizeUrl: webAuthorizeUrl,
@@ -167,18 +219,19 @@ class ConnectPersonaAuth {
       }
 
       final redirect = Uri.parse(redirectUri);
-      final result = await _webAuthorizeOpener(
-        url,
-        redirect.scheme,
-        httpsHost: redirect.scheme == 'https' ? redirect.host : null,
-        httpsPath: redirect.scheme == 'https' ? redirect.path : null,
-      ).timeout(
-        signInTimeout,
-        onTimeout: () => throw const ConnectAuthException(
-          ConnectAuthException.timeout,
-          'Timed out waiting for the web authorize flow',
-        ),
-      );
+      final result =
+          await _webAuthorizeOpener(
+            url,
+            redirect.scheme,
+            httpsHost: redirect.scheme == 'https' ? redirect.host : null,
+            httpsPath: redirect.scheme == 'https' ? redirect.path : null,
+          ).timeout(
+            signInTimeout,
+            onTimeout: () => throw const ConnectAuthException(
+              ConnectAuthException.timeout,
+              'Timed out waiting for the web authorize flow',
+            ),
+          );
 
       return parseAuthorizationCode(Uri.parse(result));
     } on ConnectAuthException {
@@ -234,7 +287,7 @@ class ConnectPersonaAuth {
 
     final lifecycleListener = AppLifecycleListener(
       onResume: () {
-        unawaited(_consumePendingLink(completer));
+        unawaited(_handleAppResume(completer));
       },
     );
 
@@ -253,17 +306,30 @@ class ConnectPersonaAuth {
     }
   }
 
+  Future<void> _handleAppResume(Completer<String> completer) async {
+    if (completer.isCompleted) return;
+
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (completer.isCompleted) return;
+
+    await _consumePendingLink(completer);
+    if (completer.isCompleted) return;
+
+    completer.completeError(
+      const ConnectAuthException(
+        ConnectAuthException.cancelled,
+        'Login cancelled',
+      ),
+    );
+  }
+
   Uri _buildAppUri() {
-    return Uri(
-      scheme: 'connectpersona',
-      host: 'oauth',
-      path: '/authorize',
-      queryParameters: {
-        'client_id': clientId,
-        'redirect_uri': redirectUri,
-        'scope': scope,
-        'response_type': 'code',
-      },
+    return Uri.parse(
+      'connectpersona://oauth/authorize'
+      '?client_id=${Uri.encodeComponent(clientId)}'
+      '&redirect_uri=${Uri.encodeComponent(redirectUri)}'
+      '&scope=${Uri.encodeComponent(scope)}'
+      '&response_type=code',
     );
   }
 
@@ -286,8 +352,6 @@ class ConnectPersonaAuth {
     }
   }
 
-  /// Like [parseAuthorizationCode], but returns `null` when [uri] is not our
-  /// configured redirect (so unrelated deep links can be ignored).
   String? tryParseAuthorizationCode(Uri uri) {
     final expected = Uri.parse(redirectUri);
     if (uri.scheme != expected.scheme || uri.host != expected.host) {
@@ -296,9 +360,6 @@ class ConnectPersonaAuth {
     return parseAuthorizationCode(uri);
   }
 
-  /// Parses an OAuth redirect [uri] and returns the authorization code.
-  ///
-  /// Throws [ConnectAuthException] for OAuth errors / missing code.
   String parseAuthorizationCode(Uri uri) {
     final expected = Uri.parse(redirectUri);
     if (uri.scheme != expected.scheme || uri.host != expected.host) {
@@ -315,8 +376,8 @@ class ConnectPersonaAuth {
         error == 'access_denied'
             ? ConnectAuthException.accessDenied
             : error == 'cancelled' || error == 'user_cancelled'
-                ? ConnectAuthException.cancelled
-                : ConnectAuthException.invalidResponse,
+            ? ConnectAuthException.cancelled
+            : ConnectAuthException.invalidResponse,
         params['error_description'] ?? error,
       );
     }
@@ -354,12 +415,34 @@ class ConnectPersonaAuth {
       ),
     );
   }
+
+  /// Returns true if the host app backgrounds within [timeout] (Connect opened).
+  static Future<bool> _defaultWaitForAppBackground(Duration timeout) async {
+    final completer = Completer<bool>();
+    final listener = AppLifecycleListener(
+      onInactive: () {
+        if (!completer.isCompleted) completer.complete(true);
+      },
+      onHide: () {
+        if (!completer.isCompleted) completer.complete(true);
+      },
+      onPause: () {
+        if (!completer.isCompleted) completer.complete(true);
+      },
+    );
+
+    try {
+      return await completer.future.timeout(timeout, onTimeout: () => false);
+    } finally {
+      listener.dispose();
+    }
+  }
 }
 
-/// Opens a web authorize URL and returns the full redirect URI string.
-typedef WebAuthorizeOpener = Future<String> Function(
-  Uri url,
-  String callbackUrlScheme, {
-  String? httpsHost,
-  String? httpsPath,
-});
+typedef WebAuthorizeOpener =
+    Future<String> Function(
+      Uri url,
+      String callbackUrlScheme, {
+      String? httpsHost,
+      String? httpsPath,
+    });

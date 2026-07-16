@@ -9,6 +9,8 @@ void main() {
     ConnectEnvironment environment = ConnectEnvironment.dev,
     String? webAuthorizeBaseUrl,
     Future<bool> Function(Uri uri, {LaunchMode mode})? launchUrlFn,
+    Future<bool> Function(Uri uri)? canLaunchUrlFn,
+    Future<bool> Function(Duration timeout)? waitForAppBackgroundFn,
     WebAuthorizeOpener? webAuthorizeOpener,
   }) {
     return ConnectPersonaAuth(
@@ -17,6 +19,8 @@ void main() {
       environment: environment,
       webAuthorizeBaseUrl: webAuthorizeBaseUrl,
       launchUrlFn: launchUrlFn,
+      canLaunchUrlFn: canLaunchUrlFn ?? ((_) async => true),
+      waitForAppBackgroundFn: waitForAppBackgroundFn,
       webAuthorizeOpener: webAuthorizeOpener,
     );
   }
@@ -111,10 +115,12 @@ void main() {
         redirectUri: 'https://dev.parking.lahvplus.com/check_account',
         environment: ConnectEnvironment.dev,
         signInTimeout: const Duration(milliseconds: 80),
+        canLaunchUrlFn: (_) async => true,
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
           expect(uri.scheme, 'connectpersona');
           return true;
         },
+        waitForAppBackgroundFn: (_) async => true,
         webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
           webOpened = true;
           return 'https://dev.parking.lahvplus.com/check_account?code=nope';
@@ -135,9 +141,28 @@ void main() {
       await shortAuth.dispose();
     });
 
+    test('fake launch without background falls back to web', () async {
+      var webOpened = false;
+      final auth = buildAuth(
+        canLaunchUrlFn: (_) async => true,
+        launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async => true,
+        waitForAppBackgroundFn: (_) async => false,
+        webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
+          webOpened = true;
+          return 'https://dev.parking.lahvplus.com/check_account?code=web-fallback';
+        },
+      );
+
+      final code = await auth.signIn(webQueryParams: {'role': 'O'});
+      expect(code, 'web-fallback');
+      expect(webOpened, isTrue);
+      await auth.dispose();
+    });
+
     test('falls back to SDK web opener when app missing', () async {
       Uri? openedUrl;
       final auth = buildAuth(
+        canLaunchUrlFn: (_) async => false,
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async => false,
         webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
           openedUrl = url;
@@ -158,8 +183,28 @@ void main() {
       await auth.dispose();
     });
 
+    test('skips launch when canLaunchUrl is false', () async {
+      var launchAttempts = 0;
+      final auth = buildAuth(
+        canLaunchUrlFn: (_) async => false,
+        launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
+          launchAttempts++;
+          return true;
+        },
+        webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
+          return 'https://dev.parking.lahvplus.com/check_account?code=from-web';
+        },
+      );
+
+      final code = await auth.signIn();
+      expect(code, 'from-web');
+      expect(launchAttempts, 0);
+      await auth.dispose();
+    });
+
     test('uses onOpenWebAuthorize escape hatch when provided', () async {
       final auth = buildAuth(
+        canLaunchUrlFn: (_) async => false,
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async => false,
         webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
           fail('default web opener should not run');
@@ -180,6 +225,7 @@ void main() {
 
     test('rejects empty code from web callback', () async {
       final auth = buildAuth(
+        canLaunchUrlFn: (_) async => false,
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async => false,
       );
 
