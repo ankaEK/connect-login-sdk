@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:math';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/widgets.dart';
@@ -27,7 +29,8 @@ class ConnectPersonaAuth {
     Future<bool> Function(Uri uri)? canLaunchUrlFn,
     Future<bool> Function(Duration timeout)? waitForAppBackgroundFn,
     WebAuthorizeOpener? webAuthorizeOpener,
-  }) : _appLinks = appLinks ?? AppLinks(),
+  }) : _parsedRedirectUri = _validateRedirectUri(redirectUri),
+       _appLinks = appLinks ?? AppLinks(),
        _launchUrl =
            launchUrlFn ??
            ((uri, {mode = LaunchMode.platformDefault}) =>
@@ -35,12 +38,18 @@ class ConnectPersonaAuth {
        _canLaunchUrl = canLaunchUrlFn ?? canLaunchUrl,
        _waitForAppBackground =
            waitForAppBackgroundFn ?? _defaultWaitForAppBackground,
-       _webAuthorizeOpener = webAuthorizeOpener ?? _defaultWebAuthorizeOpener;
+       _webAuthorizeOpener = webAuthorizeOpener ?? _defaultWebAuthorizeOpener {
+    if (clientId.isEmpty) {
+      throw ArgumentError.value(clientId, 'clientId', 'must not be empty');
+    }
+  }
 
   static const reservedOAuthKeys = {
     'client_id',
     'redirect_uri',
     'response_type',
+    'scope',
+    'state',
   };
 
   final String clientId;
@@ -60,6 +69,7 @@ class ConnectPersonaAuth {
   /// How long to wait after launchUrl for the host to background (Connect opened).
   final Duration launchHandoffTimeout;
 
+  final Uri _parsedRedirectUri;
   final AppLinks _appLinks;
   final Future<bool> Function(Uri uri, {LaunchMode mode}) _launchUrl;
   final Future<bool> Function(Uri uri) _canLaunchUrl;
@@ -67,6 +77,8 @@ class ConnectPersonaAuth {
   final WebAuthorizeOpener _webAuthorizeOpener;
 
   StreamSubscription<Uri>? _linkSubscription;
+  String? _expectedState;
+  bool _signInInProgress = false;
 
   /// HTTPS authorize base used for web fallback.
   Uri get resolvedWebAuthorizeBase {
@@ -80,93 +92,90 @@ class ConnectPersonaAuth {
   Uri buildWebAuthorizeUri({
     Uri? webAuthorizeUrl,
     Map<String, String>? webQueryParams,
+    String? state,
   }) {
-    final base = webAuthorizeUrl ?? resolvedWebAuthorizeBase;
-    final params = <String, String>{
-      ...base.queryParameters,
-      'client_id': clientId,
-      'redirect_uri': redirectUri,
-      'scope': scope,
-      'response_type': 'code',
-    };
-
-    if (webQueryParams != null) {
-      for (final entry in webQueryParams.entries) {
-        if (reservedOAuthKeys.contains(entry.key)) continue;
-        params[entry.key] = entry.value;
-      }
-    }
-
-    return base.replace(queryParameters: params);
+    return _buildAuthorizeUri(
+      base: webAuthorizeUrl ?? resolvedWebAuthorizeBase,
+      state: state,
+      webQueryParams: webQueryParams,
+    );
   }
 
   Future<bool> openAuthorizeScreen({
+    required String state,
+    Map<String, String>? webQueryParams,
     VoidCallback? onExternalAppLaunched,
     void Function(String reason)? onAppLaunchFailed,
   }) async {
-    final appUri = _buildAppUri();
+    final appUri = _buildAppUri(state: state, webQueryParams: webQueryParams);
     _log('Trying Connect app: $appUri');
 
     unawaited(_linkSubscription?.cancel());
     _linkSubscription = null;
 
+    final handoffFuture = _waitForAppBackground(launchHandoffTimeout);
+
     try {
-      final canLaunch = await _canLaunchUrl(appUri);
-      _log('canLaunchUrl($appUri) => $canLaunch');
-      if (!canLaunch) {
-        _log(
-          'canLaunchUrl=false; still attempting launchUrl '
-          '(Android package visibility can be unreliable)',
-        );
+      try {
+        final canLaunch = await _canLaunchUrl(appUri);
+        _log('canLaunchUrl($appUri) => $canLaunch');
+        if (!canLaunch) {
+          _log(
+            'canLaunchUrl=false; still attempting launchUrl '
+            '(Android package visibility can be unreliable)',
+          );
+        }
+      } catch (e) {
+        _log('canLaunchUrl threw ($e); still attempting launchUrl');
       }
-    } catch (e) {
-      _log('canLaunchUrl threw ($e); still attempting launchUrl');
-    }
 
-    bool launched = false;
-    try {
-      launched = await _launchUrl(
-        appUri,
-        mode: LaunchMode.externalNonBrowserApplication,
-      ).timeout(const Duration(seconds: 5), onTimeout: () => false);
-      _log('launchUrl(externalNonBrowserApplication) => $launched');
-
-      if (!launched) {
+      bool launched = false;
+      try {
         launched = await _launchUrl(
           appUri,
-          mode: LaunchMode.externalApplication,
+          mode: LaunchMode.externalNonBrowserApplication,
         ).timeout(const Duration(seconds: 5), onTimeout: () => false);
-        _log('launchUrl(externalApplication) => $launched');
+        _log('launchUrl(externalNonBrowserApplication) => $launched');
+
+        if (!launched) {
+          launched = await _launchUrl(
+            appUri,
+            mode: LaunchMode.externalApplication,
+          ).timeout(const Duration(seconds: 5), onTimeout: () => false);
+          _log('launchUrl(externalApplication) => $launched');
+        }
+      } catch (e) {
+        _log('launchUrl threw: $e');
+        launched = false;
       }
-    } catch (e) {
-      _log('launchUrl threw: $e');
-      launched = false;
-    }
 
-    if (!launched) {
-      const reason = 'launchUrl failed for connectpersona://';
-      _log(reason);
-      onAppLaunchFailed?.call(reason);
-      return false;
-    }
+      if (!launched) {
+        const reason = 'launchUrl failed for connectpersona://';
+        _log(reason);
+        onAppLaunchFailed?.call(reason);
+        return false;
+      }
 
-    final handedOff = await _waitForAppBackground(launchHandoffTimeout);
-    _log(
-      'app background handoff within ${launchHandoffTimeout.inMilliseconds}ms '
-      '=> $handedOff',
-    );
-    if (!handedOff) {
-      final reason =
-          'no app background within ${launchHandoffTimeout.inMilliseconds}ms '
-          '(Connect did not take foreground)';
-      _log(reason);
-      onAppLaunchFailed?.call(reason);
-      return false;
-    }
+      final handedOff = await handoffFuture;
+      _log(
+        'app background handoff within ${launchHandoffTimeout.inMilliseconds}ms '
+        '=> $handedOff',
+      );
+      if (!handedOff) {
+        final reason =
+            'no app background within ${launchHandoffTimeout.inMilliseconds}ms '
+            '(Connect did not take foreground)';
+        _log(reason);
+        onAppLaunchFailed?.call(reason);
+        return false;
+      }
 
-    _log('Connect app path succeeded');
-    onExternalAppLaunched?.call();
-    return true;
+      _log('Connect app path succeeded');
+      onExternalAppLaunched?.call();
+      return true;
+    } finally {
+      unawaited(handoffFuture);
+    }
   }
 
   Future<String> signIn({
@@ -178,32 +187,68 @@ class ConnectPersonaAuth {
     Uri? webAuthorizeUrl,
     Future<String> Function(Uri url)? onOpenWebAuthorize,
   }) async {
-    final launched = await openAuthorizeScreen(
-      onExternalAppLaunched: onExternalAppLaunched,
-      onAppLaunchFailed: onAppLaunchFailed,
-    );
-
-    if (launched) {
-      return _waitForAuthorizationCode(listenForRedirect: listenForRedirect);
+    if (_signInInProgress) {
+      throw const ConnectAuthException(
+        ConnectAuthException.alreadyInProgress,
+        'A sign-in is already in progress',
+      );
     }
 
-    _log('Falling back to web authorize');
-    onFellBackToWeb?.call();
-    return _signInWithWeb(
-      webQueryParams: webQueryParams,
-      webAuthorizeUrl: webAuthorizeUrl,
-      onOpenWebAuthorize: onOpenWebAuthorize,
-    );
+    _signInInProgress = true;
+    final state = _generateState();
+    _expectedState = state;
+
+    try {
+      final launched = await openAuthorizeScreen(
+        state: state,
+        webQueryParams: webQueryParams,
+        onExternalAppLaunched: onExternalAppLaunched,
+        onAppLaunchFailed: onAppLaunchFailed,
+      );
+
+      if (launched) {
+        return await _waitForAuthorizationCode(
+          listenForRedirect: listenForRedirect,
+        );
+      }
+
+      _log('Falling back to web authorize');
+      onFellBackToWeb?.call();
+      return await _signInWithWeb(
+        webQueryParams: webQueryParams,
+        webAuthorizeUrl: webAuthorizeUrl,
+        onOpenWebAuthorize: onOpenWebAuthorize,
+        state: state,
+      );
+    } finally {
+      _signInInProgress = false;
+      _expectedState = null;
+    }
   }
 
   Future<String> _signInWithWeb({
+    required String state,
     Map<String, String>? webQueryParams,
     Uri? webAuthorizeUrl,
     Future<String> Function(Uri url)? onOpenWebAuthorize,
   }) async {
+    Uri authorizeBase;
+    try {
+      authorizeBase = webAuthorizeUrl ?? resolvedWebAuthorizeBase;
+      if (!authorizeBase.hasScheme || authorizeBase.host.isEmpty) {
+        throw const FormatException('invalid authorize base');
+      }
+    } catch (e) {
+      throw ConnectAuthException(
+        ConnectAuthException.appNotAvailable,
+        'Connect app unavailable and web authorize URL is invalid: $e',
+      );
+    }
+
     final url = buildWebAuthorizeUri(
-      webAuthorizeUrl: webAuthorizeUrl,
+      webAuthorizeUrl: authorizeBase,
       webQueryParams: webQueryParams,
+      state: state,
     );
 
     try {
@@ -218,7 +263,7 @@ class ConnectPersonaAuth {
         return _requireCode(code);
       }
 
-      final redirect = Uri.parse(redirectUri);
+      final redirect = _parsedRedirectUri;
       final result =
           await _webAuthorizeOpener(
             url,
@@ -309,28 +354,56 @@ class ConnectPersonaAuth {
   Future<void> _handleAppResume(Completer<String> completer) async {
     if (completer.isCompleted) return;
 
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (completer.isCompleted) return;
+    for (final delayMs in [300, 500, 800, 1200]) {
+      if (completer.isCompleted) return;
+      await Future<void>.delayed(Duration(milliseconds: delayMs));
+      await _consumePendingLink(completer);
+      if (completer.isCompleted) return;
+    }
+  }
 
-    await _consumePendingLink(completer);
-    if (completer.isCompleted) return;
-
-    completer.completeError(
-      const ConnectAuthException(
-        ConnectAuthException.cancelled,
-        'Login cancelled',
-      ),
+  Uri _buildAppUri({
+    required String state,
+    Map<String, String>? webQueryParams,
+  }) {
+    return _buildAuthorizeUri(
+      base: Uri.parse('connectpersona://oauth/authorize'),
+      state: state,
+      webQueryParams: webQueryParams,
     );
   }
 
-  Uri _buildAppUri() {
-    return Uri.parse(
-      'connectpersona://oauth/authorize'
-      '?client_id=${Uri.encodeComponent(clientId)}'
-      '&redirect_uri=${Uri.encodeComponent(redirectUri)}'
-      '&scope=${Uri.encodeComponent(scope)}'
-      '&response_type=code',
-    );
+  Uri _buildAuthorizeUri({
+    required Uri base,
+    String? state,
+    Map<String, String>? webQueryParams,
+  }) {
+    final params = <String, String>{
+      ...base.queryParameters,
+      ..._baseOAuthParams(state: state),
+    };
+
+    if (webQueryParams != null) {
+      for (final entry in webQueryParams.entries) {
+        if (reservedOAuthKeys.contains(entry.key)) continue;
+        params[entry.key] = entry.value;
+      }
+    }
+
+    return base.replace(queryParameters: params);
+  }
+
+  Map<String, String> _baseOAuthParams({String? state}) {
+    final params = <String, String>{
+      'client_id': clientId,
+      'redirect_uri': redirectUri,
+      'scope': scope,
+      'response_type': 'code',
+    };
+    if (state != null) {
+      params['state'] = state;
+    }
+    return params;
   }
 
   Future<void> _consumePendingLink(Completer<String> completer) async {
@@ -353,16 +426,14 @@ class ConnectPersonaAuth {
   }
 
   String? tryParseAuthorizationCode(Uri uri) {
-    final expected = Uri.parse(redirectUri);
-    if (uri.scheme != expected.scheme || uri.host != expected.host) {
+    if (!_redirectUriMatches(uri)) {
       return null;
     }
     return parseAuthorizationCode(uri);
   }
 
   String parseAuthorizationCode(Uri uri) {
-    final expected = Uri.parse(redirectUri);
-    if (uri.scheme != expected.scheme || uri.host != expected.host) {
+    if (!_redirectUriMatches(uri)) {
       throw const ConnectAuthException(
         ConnectAuthException.invalidResponse,
         'Redirect URI did not match the configured redirectUri',
@@ -382,6 +453,8 @@ class ConnectPersonaAuth {
       );
     }
 
+    _verifyState(params['state']);
+
     return _requireCode(params['code']);
   }
 
@@ -393,6 +466,53 @@ class ConnectPersonaAuth {
       );
     }
     return code;
+  }
+
+  void _verifyState(String? returnedState) {
+    final expected = _expectedState;
+    if (expected == null) return;
+    if (returnedState == null || returnedState != expected) {
+      throw const ConnectAuthException(
+        ConnectAuthException.stateMismatch,
+        'OAuth state did not match',
+      );
+    }
+  }
+
+  bool _redirectUriMatches(Uri uri) {
+    final expected = _parsedRedirectUri;
+    if (uri.scheme != expected.scheme || uri.host != expected.host) {
+      return false;
+    }
+    if (expected.path.isNotEmpty && expected.path != '/') {
+      return uri.path == expected.path;
+    }
+    return true;
+  }
+
+  static Uri _validateRedirectUri(String redirectUri) {
+    if (redirectUri.isEmpty) {
+      throw ArgumentError.value(
+        redirectUri,
+        'redirectUri',
+        'must not be empty',
+      );
+    }
+    final parsed = Uri.tryParse(redirectUri);
+    if (parsed == null || parsed.scheme.isEmpty) {
+      throw ArgumentError.value(
+        redirectUri,
+        'redirectUri',
+        'must be a valid URI with a scheme',
+      );
+    }
+    return parsed;
+  }
+
+  static String _generateState() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
   }
 
   Future<void> dispose() async {

@@ -9,6 +9,8 @@ class ConnectAuthException implements Exception {
   static const invalidResponse = 'invalid_response';
   static const timeout = 'timeout';
   static const appNotAvailable = 'app_not_available';
+  static const stateMismatch = 'state_mismatch';
+  static const alreadyInProgress = 'already_in_progress';
 
   @override
   String toString() => 'ConnectAuthException($code): $message';
