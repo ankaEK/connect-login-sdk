@@ -1,95 +1,312 @@
 # login_with_connect
 
-Flutter package for signing in with **Connect Persona**.
+Flutter SDK for **Sign in with Connect Persona**.
 
-The SDK owns login routing: it tries the Connect Persona app first, then falls
-back to a web authorize flow. Your host app supplies `clientId` and `scope`,
-maps Flutter flavor → environment, calls `signIn`, and exchanges the returned
-authorization code on the backend.
+Add Connect login to your app with a single `signIn()` call. The SDK tries the
+Connect Persona app first, then falls back to a secure system browser. Your app
+receives an OAuth authorization code; exchange it on your **backend** for tokens
+and user profile.
 
-The OAuth **redirect URI is fixed in the SDK**
-(`ConnectPersonaAuth.sdkRedirectUri`). Register that exact value on your
-Connect portal client.
+| | |
+|---|---|
+| **Package** | `login_with_connect` |
+| **Platforms** | Android, iOS |
+| **Auth style** | OAuth 2.0 authorization code |
+| **Redirect URI** | Fixed by the SDK (see below) |
+| **Portal** | [developers.connectpersona.com](https://developers.connectpersona.com/) |
 
-## Features
+## Overview
 
-- SDK-owned app → web routing
-- Fixed SDK redirect URI (`loginwithconnect://oauth/callback`)
-- Host-supplied `clientId` and `scope`
-- `ConnectEnvironment` for dev / uat / prod auth hosts
-- `webQueryParams` for product/flow context (e.g. `role`, `signup`)
-- Deep-link redirect listening + resume recovery for the app path
-- System web auth via `flutter_web_auth_2` (optional host WebView hook)
-- Typed errors via `ConnectAuthException`
+1. Host app creates a Connect OAuth client and registers the SDK redirect URI.
+2. Host wires Android / iOS deep links for that URI.
+3. Host calls `ConnectPersonaAuth.signIn(...)`.
+4. SDK opens Connect (app → web fallback) and returns an authorization `code`.
+5. Host sends `code` to its backend; backend exchanges it for tokens (never use
+   `client_secret` in the mobile app).
 
-## Getting started
+```text
+┌─────────────┐     signIn()      ┌──────────────────┐
+│  Host app   │ ───────────────►  │ login_with_connect│
+└─────────────┘                   └────────┬─────────┘
+                                           │
+                    ┌──────────────────────┼──────────────────────┐
+                    ▼                      ▼                      │
+           Connect Persona app    System browser / web auth       │
+           (connectpersona://)    (HTTPS authorize)               │
+                    │                      │                      │
+                    └──────────┬───────────┘                      │
+                               ▼                                  │
+                    loginwithconnect://oauth/callback             │
+                               │                                  │
+                               ▼                                  │
+                         authorization code  ◄────────────────────┘
+                               │
+                               ▼
+                         Host backend → /oauth/token
+```
 
-1. Add the dependency:
+## Requirements
+
+- Flutter **3.32+** / Dart **3.8+**
+- A Connect Persona OAuth client from the
+  [developer portal](https://developers.connectpersona.com/)
+- Android and/or iOS project with deep-link support for the SDK redirect URI
+
+## Installation
+
+### Git (recommended until published on pub.dev)
 
 ```yaml
 dependencies:
   login_with_connect:
-    path: ../login_with_connect # or your git / hosted source
+    git:
+      url: https://github.com/ankaEK/connect-login-sdk.git
+      ref: main # pin to a tag/commit in production
 ```
 
-2. In the Connect developer portal, create (or use) an OAuth client and
-   register this **exact** redirect URI:
+### Path (monorepo / local development)
 
-   `loginwithconnect://oauth/callback`
+```yaml
+dependencies:
+  login_with_connect:
+    path: ../connect-login-sdk
+```
 
-   (`ConnectPersonaAuth.sdkRedirectUri`)
+Then:
 
-3. Wire the same deep link in Android / iOS (see `example/` manifests).
+```bash
+flutter pub get
+```
 
-4. Map your Flutter flavor to `ConnectEnvironment` (do **not** put `role` in flavor).
+## Configure your OAuth client
+
+1. Open the [Connect developer portal](https://developers.connectpersona.com/).
+2. Create or select an OAuth client for the target environment
+   (`dev` / `uat` / `prod`).
+3. Register this **exact** redirect URI (owned by the SDK — not configurable):
+
+   ```text
+   loginwithconnect://oauth/callback
+   ```
+
+   Constant: `ConnectPersonaAuth.sdkRedirectUri`.
+
+4. Note your **Client ID**. Keep **Client Secret** on the server only.
+5. Enable the scopes your app will request (for example `profile.basic`).
+
+## Platform setup
+
+Deep links must match `loginwithconnect://oauth/callback`. Also declare the
+Connect app scheme so Android / iOS can detect and launch it.
+
+### Android
+
+In `android/app/src/main/AndroidManifest.xml`:
+
+1. Add an intent filter on your main activity (use `singleTop` or equivalent so
+   redirects resume the same task):
+
+```xml
+<intent-filter>
+    <action android:name="android.intent.action.VIEW"/>
+    <category android:name="android.intent.category.DEFAULT"/>
+    <category android:name="android.intent.category.BROWSABLE"/>
+    <data
+        android:scheme="loginwithconnect"
+        android:host="oauth"
+        android:pathPrefix="/callback"/>
+</intent-filter>
+```
+
+2. Under `<manifest>`, allow querying the Connect app (Android 11+ package
+   visibility):
+
+```xml
+<queries>
+    <intent>
+        <action android:name="android.intent.action.VIEW"/>
+        <data android:scheme="connectpersona"/>
+    </intent>
+</queries>
+```
+
+See the complete file in
+[`example/android/app/src/main/AndroidManifest.xml`](example/android/app/src/main/AndroidManifest.xml).
+
+### iOS
+
+In `ios/Runner/Info.plist`:
+
+1. Register the SDK URL scheme:
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleTypeRole</key>
+    <string>Editor</string>
+    <key>CFBundleURLName</key>
+    <string>com.example.yourapp.oauth</string>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>loginwithconnect</string>
+    </array>
+  </dict>
+</array>
+```
+
+2. Allow querying the Connect Persona app:
+
+```xml
+<key>LSApplicationQueriesSchemes</key>
+<array>
+  <string>connectpersona</string>
+</array>
+```
+
+See [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist).
 
 ## Usage
+
+### Sign in
 
 ```dart
 import 'package:login_with_connect/login_with_connect.dart';
 
 final auth = ConnectPersonaAuth(
   clientId: 'your-client-id', // from Connect portal
-  scope: 'profile.basic',     // from host app
-  environment: ConnectEnvironment.dev, // from Flutter flavor
+  scope: 'profile.basic',     // space-delimited if multiple
+  environment: ConnectEnvironment.prod, // map from your Flutter flavor
 );
 
 try {
   final code = await auth.signIn(
     onExternalAppLaunched: () {
-      // Optional: show “Waiting for Connect Persona…” UI
+      // Optional: “Waiting for Connect Persona…”
+    },
+    onFellBackToWeb: () {
+      // Optional: “Using web sign-in…”
+    },
+    onAppLaunchFailed: (reason) {
+      // Optional: diagnostics before web fallback
     },
     webQueryParams: {
+      // Product / flow context (not environment)
       'role': 'O',
       'signup': 'false',
     },
   );
+
   // Send `code` to your backend to exchange for tokens.
 } on ConnectAuthException catch (e) {
-  // e.code: access_denied | cancelled | timeout | app_not_available | invalid_response
+  // See Error handling
 } finally {
   await auth.dispose();
 }
 ```
 
-### Flavor → environment
+Always call `dispose()` when you are done with an auth instance.
+
+### Recover after process death (Android)
+
+If Android kills your process while Connect is open, the in-flight `signIn`
+`Future` is lost. On cold start, recover the code from the deep link:
+
+```dart
+@override
+void initState() {
+  super.initState();
+  unawaited(_recover());
+}
+
+Future<void> _recover() async {
+  try {
+    final code = await ConnectPersonaAuth.recoverAuthorizationCode();
+    if (code == null) return;
+    // Same as a successful signIn — send `code` to your backend.
+  } on ConnectAuthException catch (e) {
+    // User denied / invalid redirect, etc.
+  }
+}
+```
+
+The SDK persists OAuth `state` during `signIn` so a cold-start redirect can be
+verified. See the [`example/`](example/) app.
+
+### Environments
+
+Map your Flutter flavor (or build config) to `ConnectEnvironment`. Do **not**
+encode product params such as `role` in the flavor — pass those via
+`webQueryParams`.
 
 | Flutter flavor | `ConnectEnvironment` | Auth host |
 |----------------|----------------------|-----------|
-| dev | `ConnectEnvironment.dev` | `https://dev.connectpersona.com` |
-| stg / uat | `ConnectEnvironment.uat` | `https://uat.connectpersona.com` |
-| prod | `ConnectEnvironment.prod` | `https://app.connectpersona.com` |
+| `dev` | `ConnectEnvironment.dev` | `https://dev.connectpersona.com` |
+| `stg` / `uat` | `ConnectEnvironment.uat` | `https://uat.connectpersona.com` |
+| `prod` | `ConnectEnvironment.prod` | `https://app.connectpersona.com` |
 
-Optional: pass `webAuthorizeBaseUrl` to override the environment-derived
-`{host}/api/v1/oauth/authorize` URL.
+Authorize URL (default): `{authHost}/api/v1/oauth/authorize`.
 
-### Optional host WebView
+Optional override: pass `webAuthorizeBaseUrl` on `ConnectPersonaAuth` to replace
+the environment-derived authorize base URL.
 
-Only if you need in-app WebView interception instead of the SDK browser:
+### Error handling
+
+`signIn` and `recoverAuthorizationCode` throw `ConnectAuthException`:
+
+| `e.code` | When |
+|----------|------|
+| `cancelled` | User cancelled (when detectable) |
+| `access_denied` | User / server denied access |
+| `timeout` | App opened but no redirect before `signInTimeout` (default 5 minutes) |
+| `app_not_available` | Connect app unavailable and web authorize URL invalid |
+| `invalid_response` | Missing/empty code or unexpected redirect payload |
+| `state_mismatch` | Redirect `state` does not match the current attempt |
+| `already_in_progress` | Concurrent `signIn` on the same instance |
+
+Stale deep links with a different `state` while waiting are **ignored** (they do
+not fail the current attempt).
+
+### Backend: exchange the authorization code
+
+Exchange the code on your **server** with the client secret. Do not embed the
+secret in the Flutter app.
+
+Token endpoint (match the same environment as authorize):
+
+```text
+POST {authHost}/api/v1/oauth/token
+Content-Type: application/json
+
+{
+  "client_id": "<your-client-id>",
+  "client_secret": "<server-only-secret>",
+  "code": "<authorization-code>"
+}
+```
+
+| Environment | Token host |
+|-------------|------------|
+| `dev` | `https://dev.connectpersona.com` |
+| `uat` | `https://uat.connectpersona.com` |
+| `prod` | `https://app.connectpersona.com` |
+
+Typical success payload includes `access_token`, `refresh_token`, `expires_in`,
+and a `user` object. Confirm request/response fields with the Connect API docs
+for your account.
+
+Authorization codes are short-lived (on the order of one minute) — exchange
+promptly.
+
+## Advanced
+
+### Custom in-app WebView
+
+By default, web fallback uses `flutter_web_auth_2` (system auth session). Only
+use a custom WebView if you must intercept HTTPS redirects in-process:
 
 ```dart
 final code = await auth.signIn(
-  webQueryParams: {'role': 'O'},
   onOpenWebAuthorize: (url) async {
     // Open your WebView with [url], intercept redirect, return code
     return code;
@@ -97,26 +314,46 @@ final code = await auth.signIn(
 );
 ```
 
-Launch app only (without waiting for a code):
+### Launch Connect without waiting for a code
 
 ```dart
-final opened = await auth.openAuthorizeScreen(state: '...');
+final opened = await auth.openAuthorizeScreen(state: 'your-csrf-state');
 ```
 
-## Platform setup notes
+Prefer `signIn()` for the full app → web → code flow.
 
-- **Android / iOS:** deep links must match `ConnectPersonaAuth.sdkRedirectUri`
-  (`loginwithconnect://oauth/callback`).
-- Never exchange the authorization code in the client with a secret; do that
-  on your server.
+### Reserved query keys
+
+`webQueryParams` cannot override: `client_id`, `redirect_uri`, `scope`,
+`response_type`, or `state`. Those are set by the SDK.
 
 ## Example
 
-See the [`example/`](example/) app for a minimal demo. Set `kClientId` (and
-optionally `kScope`) in `example/lib/main.dart` before running. Register
-`loginwithconnect://oauth/callback` on that portal client.
+The [`example/`](example/) app is a minimal host integration:
+
+1. Set `kClientId` (and optionally `kScope`) in
+   [`example/lib/main.dart`](example/lib/main.dart).
+2. Ensure the portal client has redirect
+   `loginwithconnect://oauth/callback`.
+3. Run:
+
+```bash
+cd example
+flutter pub get
+flutter run
+```
+
+On success, the demo shows the authorization code and a sample token-exchange
+`curl` for backend testing. It also calls `recoverAuthorizationCode()` on
+startup for Android process-death recovery.
+
+> **Note:** The example disables Impeller on Android
+> (`io.flutter.embedding.android.EnableImpeller` = `false`) to avoid a black
+> screen on some GPUs. That is an example-app workaround, not an SDK
+> requirement.
 
 ## Additional information
 
-See [DESIGN.md](DESIGN.md) for routing and env vs product-param decisions.
-Call `dispose()` when you are done with an auth instance.
+- Architecture and edge cases: [DESIGN.md](DESIGN.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Issues / source: [github.com/ankaEK/connect-login-sdk](https://github.com/ankaEK/connect-login-sdk)
