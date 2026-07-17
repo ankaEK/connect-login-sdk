@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 
 /// Replace with your Connect Persona OAuth client ID (from the developer portal).
@@ -27,6 +28,8 @@ class _SignInDemoState extends State<SignInDemo> {
   String _status = 'Not signed in.';
   String? _authCode;
   String? _errorMessage;
+  bool _codeCopied = false;
+  bool _curlCopied = false;
 
   @override
   void initState() {
@@ -95,6 +98,27 @@ curl -X 'POST' \\
 }
 ''';
 
+  Future<void> _copyText(String text, {required bool isCode}) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    setState(() {
+      if (isCode) {
+        _codeCopied = true;
+      } else {
+        _curlCopied = true;
+      }
+    });
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    setState(() {
+      if (isCode) {
+        _codeCopied = false;
+      } else {
+        _curlCopied = false;
+      }
+    });
+  }
+
   Future<void> _handleSignIn() async {
     if (_signingIn) return;
 
@@ -102,6 +126,8 @@ curl -X 'POST' \\
       _signingIn = true;
       _authCode = null;
       _errorMessage = null;
+      _codeCopied = false;
+      _curlCopied = false;
       _status = 'Starting sign-in…';
     });
 
@@ -178,12 +204,31 @@ curl -X 'POST' \\
                 ],
                 if (code != null) ...[
                   const SizedBox(height: 20),
-                  SelectableText(
-                    'Code: $code',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: SelectableText(
+                          'Code: $code',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      GestureDetector(
+                        onTap: () => _copyText(code, isCode: true),
+                        child: Icon(
+                          _codeCopied ? Icons.check : Icons.copy,
+                          size: 14,
+                          color: _codeCopied
+                              ? Colors.green
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -199,9 +244,14 @@ curl -X 'POST' \\
                   const SizedBox(height: 12),
                   const Text('CURL:'),
                   const SizedBox(height: 8),
-                  _CodeBlock(text: _tokenCurlFor(code)),
+                  _CodeBlock(
+                    text: _tokenCurlFor(code),
+                    onCopy: () =>
+                        _copyText(_tokenCurlFor(code), isCode: false),
+                    copied: _curlCopied,
+                  ),
                   const SizedBox(height: 16),
-                  const Text('Response:'),
+                  const Text('Sample Response:'),
                   const SizedBox(height: 8),
                   const _CodeBlock(text: _tokenResponseSample),
                 ],
@@ -226,9 +276,15 @@ curl -X 'POST' \\
 }
 
 class _CodeBlock extends StatelessWidget {
-  const _CodeBlock({required this.text});
+  const _CodeBlock({
+    required this.text,
+    this.onCopy,
+    this.copied = false,
+  });
 
   final String text;
+  final VoidCallback? onCopy;
+  final bool copied;
 
   @override
   Widget build(BuildContext context) {
@@ -239,17 +295,37 @@ class _CodeBlock extends StatelessWidget {
         color: const Color(0xFF1E1E1E),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SelectableText(
-          text.trim(),
-          style: const TextStyle(
-            fontFamily: 'monospace',
-            fontSize: 12,
-            color: Color(0xFFE8E8E8),
-            height: 1.4,
+      child: Stack(
+        children: [
+          Padding(
+            padding: EdgeInsets.only(top: onCopy != null ? 4 : 0, right: onCopy != null ? 22 : 0),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SelectableText(
+                text.trim(),
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: Color(0xFFE8E8E8),
+                  height: 1.4,
+                ),
+              ),
+            ),
           ),
-        ),
+          if (onCopy != null)
+            Positioned(
+              top: 0,
+              right: 0,
+              child: GestureDetector(
+                onTap: onCopy,
+                child: Icon(
+                  copied ? Icons.check : Icons.copy,
+                  size: 14,
+                  color: copied ? Colors.greenAccent : const Color(0xFFB0B0B0),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
