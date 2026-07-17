@@ -41,10 +41,12 @@ void main() {
 
   setUp(() {
     originalAppLinksPlatform = AppLinksPlatform.instance;
+    AppLinksPlatform.instance = FakeAppLinksPlatform();
   });
 
   tearDown(() {
     AppLinksPlatform.instance = originalAppLinksPlatform;
+    ConnectPersonaAuth.debugSetPersistedOAuthState(null);
   });
 
   ConnectPersonaAuth buildAuth({
@@ -470,6 +472,88 @@ void main() {
       await linkController.close();
       await auth.dispose();
     });
+
+    test('ignores stale redirect with wrong state then accepts matching', () async {
+      final linkController = StreamController<Uri>.broadcast();
+      final fakePlatform = FakeAppLinksPlatform(
+        initialLink: Uri.parse(
+          _redirectWithCode('stale-code', state: 'old-state'),
+        ),
+        uriLinkStream: linkController.stream,
+      );
+      AppLinksPlatform.instance = fakePlatform;
+      String? capturedState;
+
+      final auth = buildAuth(
+        appLinks: AppLinks(),
+        launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
+          capturedState = uri.queryParameters['state'];
+          return true;
+        },
+        waitForAppBackgroundFn: (_) async => true,
+        webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
+          fail('web fallback should not run');
+        },
+      );
+
+      final signInFuture = auth.signIn();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // Stale callback (wrong state) must not complete with state_mismatch.
+      linkController.add(
+        Uri.parse(_redirectWithCode('stale-code', state: 'old-state')),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      linkController.add(
+        Uri.parse(_redirectWithCode('fresh-code', state: capturedState)),
+      );
+
+      expect(await signInFuture, 'fresh-code');
+      await linkController.close();
+      await auth.dispose();
+    });
+
+    test('ignores stale redirect missing state then accepts matching', () async {
+      final linkController = StreamController<Uri>.broadcast();
+      AppLinksPlatform.instance = FakeAppLinksPlatform(
+        latestLink: Uri.parse('$_redirectUri?code=stale-no-state'),
+        uriLinkStream: linkController.stream,
+      );
+      String? capturedState;
+
+      final auth = buildAuth(
+        appLinks: AppLinks(),
+        launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
+          capturedState = uri.queryParameters['state'];
+          return true;
+        },
+        waitForAppBackgroundFn: (_) async => true,
+        webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
+          fail('web fallback should not run');
+        },
+      );
+
+      final signInFuture = auth.signIn();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // Missing state must not fail the session with state_mismatch.
+      linkController.add(Uri.parse('$_redirectUri?code=stale-no-state'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+
+      linkController.add(
+        Uri.parse(_redirectWithCode('fresh-code', state: capturedState)),
+      );
+
+      expect(await signInFuture, 'fresh-code');
+      await linkController.close();
+      await auth.dispose();
+    });
   });
 
   group('parseAuthorizationCode', () {
@@ -479,6 +563,49 @@ void main() {
         Uri.parse('$_redirectUri?code=xyz'),
       );
       expect(code, 'xyz');
+    });
+
+    test('tryParse ignores wrong state while sign-in expects another', () async {
+      final linkController = StreamController<Uri>.broadcast();
+      AppLinksPlatform.instance = FakeAppLinksPlatform(
+        uriLinkStream: linkController.stream,
+      );
+      String? capturedState;
+      final auth = buildAuth(
+        appLinks: AppLinks(),
+        launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
+          capturedState = uri.queryParameters['state'];
+          return true;
+        },
+        waitForAppBackgroundFn: (_) async => true,
+        webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
+          fail('should not web-fallback');
+        },
+      );
+
+      final future = auth.signIn();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(capturedState, isNotEmpty);
+
+      expect(
+        auth.tryParseAuthorizationCode(
+          Uri.parse('$_redirectUri?code=x&state=other'),
+        ),
+        isNull,
+      );
+      expect(
+        auth.tryParseAuthorizationCode(
+          Uri.parse('$_redirectUri?code=x'),
+        ),
+        isNull,
+      );
+
+      linkController.add(
+        Uri.parse(_redirectWithCode('ok', state: capturedState)),
+      );
+      expect(await future, 'ok');
+      await linkController.close();
+      await auth.dispose();
     });
 
     test('maps access_denied', () {
@@ -505,6 +632,47 @@ void main() {
         ),
         isNull,
       );
+    });
+  });
+
+  group('recoverAuthorizationCode', () {
+    tearDown(() {
+      ConnectPersonaAuth.debugSetPersistedOAuthState(null);
+    });
+
+    test('returns null when no persisted state', () async {
+      ConnectPersonaAuth.debugSetPersistedOAuthState(null);
+      AppLinksPlatform.instance = FakeAppLinksPlatform(
+        initialLink: Uri.parse(_redirectWithCode('x', state: 's')),
+      );
+      expect(await ConnectPersonaAuth.recoverAuthorizationCode(), isNull);
+    });
+
+    test('recovers code when initial link matches persisted state', () async {
+      const state = 'cold-start-state';
+      ConnectPersonaAuth.debugSetPersistedOAuthState(state);
+      AppLinksPlatform.instance = FakeAppLinksPlatform(
+        initialLink: Uri.parse(
+          _redirectWithCode('recovered-code', state: state),
+        ),
+      );
+
+      expect(
+        await ConnectPersonaAuth.recoverAuthorizationCode(),
+        'recovered-code',
+      );
+      // Persisted state cleared after success.
+      expect(await ConnectPersonaAuth.recoverAuthorizationCode(), isNull);
+    });
+
+    test('ignores initial link when state does not match', () async {
+      ConnectPersonaAuth.debugSetPersistedOAuthState('expected');
+      AppLinksPlatform.instance = FakeAppLinksPlatform(
+        initialLink: Uri.parse(
+          _redirectWithCode('nope', state: 'other'),
+        ),
+      );
+      expect(await ConnectPersonaAuth.recoverAuthorizationCode(), isNull);
     });
   });
 }

@@ -26,8 +26,20 @@ that need in-app interception (escape hatch only).
 
 ## Deep links
 App success returns via the fixed SDK `redirectUri` and `app_links`.
+While waiting, redirects with missing/wrong `state` are ignored (stale
+callbacks) so they cannot fail the in-progress `signIn` with
+`state_mismatch`. Only a callback whose `state` matches the current attempt
+completes (or errors like `access_denied` for that attempt).
+
+If Android kills the host while Connect is open, call
+`ConnectPersonaAuth.recoverAuthorizationCode()` on startup (see example).
+`signIn` persists OAuth `state` so a cold-start deep link can still be verified.
 `webQueryParams` are applied to both the native app deep link and the HTTPS
 authorize URL.
+
+On resume, only `getLatestLink` is consulted (not `getInitialLink`). Stale
+callbacks whose `state` does not match the in-progress sign-in are ignored so
+a previous session cannot raise a false `state_mismatch`.
 
 ## Reserved OAuth keys
 `webQueryParams` cannot override `client_id`, `redirect_uri`, `scope`,
@@ -38,6 +50,8 @@ authorize URL.
 - User cancel in web session → `cancelled` when detectable
 - App launched but no redirect before `signInTimeout` → `timeout`
 - Unrelated deep links while waiting are ignored
+- Stale redirect with a different `state` → ignored (wait for current attempt)
+- Current redirect missing/`state` mismatch → `state_mismatch`
 
 ## Example app
 `example/` is a minimal host demo: one Sign In button, status / auth code /

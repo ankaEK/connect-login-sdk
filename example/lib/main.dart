@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 
@@ -8,6 +10,7 @@ const String kClientId = 'client_e48a3e01-8481-4cad-8dc0-f97f19004dc6';
 const String kScope = 'profile.basic';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MaterialApp(title: 'Connect Sign In', home: SignInDemo()));
 }
 
@@ -24,6 +27,39 @@ class _SignInDemoState extends State<SignInDemo> {
   String _status = 'Not signed in.';
   String? _authCode;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_recoverFromColdStart());
+  }
+
+  /// When Android kills the example while Connect is open, the deep-link
+  /// restart loses the in-flight [signIn] Future — recover the code here.
+  Future<void> _recoverFromColdStart() async {
+    try {
+      final code = await ConnectPersonaAuth.recoverAuthorizationCode();
+      if (!mounted || code == null) return;
+      setState(() {
+        _authCode = code;
+        _status = 'Signed in';
+        _errorMessage = null;
+      });
+    } on ConnectAuthException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _authCode = null;
+        _status = 'Sign-in failed.';
+        _errorMessage = '${e.code}: ${e.message}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _status = 'Sign-in failed.';
+        _errorMessage = e.toString();
+      });
+    }
+  }
 
   String _tokenCurlFor(String code) {
     return '''
