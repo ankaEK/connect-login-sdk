@@ -3,12 +3,19 @@
 Flutter package for signing in with **Connect Persona**.
 
 The SDK owns login routing: it tries the Connect Persona app first, then falls
-back to a web authorize flow. Your host app maps Flutter flavor → environment,
-calls `signIn`, and exchanges the returned authorization code on the backend.
+back to a web authorize flow. Your host app supplies `clientId` and `scope`,
+maps Flutter flavor → environment, calls `signIn`, and exchanges the returned
+authorization code on the backend.
+
+The OAuth **redirect URI is fixed in the SDK**
+(`ConnectPersonaAuth.sdkRedirectUri`). Register that exact value on your
+Connect portal client.
 
 ## Features
 
 - SDK-owned app → web routing
+- Fixed SDK redirect URI (`loginwithconnect://oauth/callback`)
+- Host-supplied `clientId` and `scope`
 - `ConnectEnvironment` for dev / uat / prod auth hosts
 - `webQueryParams` for product/flow context (e.g. `role`, `signup`)
 - Deep-link redirect listening + resume recovery for the app path
@@ -25,10 +32,14 @@ dependencies:
     path: ../login_with_connect # or your git / hosted source
 ```
 
-2. Register your app’s redirect URI (custom scheme or HTTPS app links) so
-   Connect can return to your app.
+2. In the Connect developer portal, create (or use) an OAuth client and
+   register this **exact** redirect URI:
 
-3. Configure Connect Persona with matching `client_id` and `redirect_uri`.
+   `loginwithconnect://oauth/callback`
+
+   (`ConnectPersonaAuth.sdkRedirectUri`)
+
+3. Wire the same deep link in Android / iOS (see `example/` manifests).
 
 4. Map your Flutter flavor to `ConnectEnvironment` (do **not** put `role` in flavor).
 
@@ -38,8 +49,8 @@ dependencies:
 import 'package:login_with_connect/login_with_connect.dart';
 
 final auth = ConnectPersonaAuth(
-  clientId: 'your-client-id',
-  redirectUri: 'https://your.app/check_account', // or yourapp://oauth/callback
+  clientId: 'your-client-id', // from Connect portal
+  scope: 'profile.basic',     // from host app
   environment: ConnectEnvironment.dev, // from Flutter flavor
 );
 
@@ -89,21 +100,21 @@ final code = await auth.signIn(
 Launch app only (without waiting for a code):
 
 ```dart
-final opened = await auth.openAuthorizeScreen();
+final opened = await auth.openAuthorizeScreen(state: '...');
 ```
 
 ## Platform setup notes
 
-- **Android / iOS:** deep links / app links must match `redirectUri`.
-- For HTTPS callbacks with the default web path, `flutter_web_auth_2` may need
-  platform setup (`httpsHost` / `httpsPath` are passed from `redirectUri`).
+- **Android / iOS:** deep links must match `ConnectPersonaAuth.sdkRedirectUri`
+  (`loginwithconnect://oauth/callback`).
 - Never exchange the authorization code in the client with a secret; do that
   on your server.
 
 ## Example
 
-See the [`example/`](example/) app for a minimal demo. Set `kClientId` in
-`example/lib/main.dart` before running.
+See the [`example/`](example/) app for a minimal demo. Set `kClientId` (and
+optionally `kScope`) in `example/lib/main.dart` before running. Register
+`loginwithconnect://oauth/callback` on that portal client.
 
 ## Additional information
 

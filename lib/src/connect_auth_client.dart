@@ -18,7 +18,6 @@ void _log(String message) {
 class ConnectPersonaAuth {
   ConnectPersonaAuth({
     required this.clientId,
-    required this.redirectUri,
     required this.environment,
     this.scope = 'profile.basic',
     this.webAuthorizeBaseUrl,
@@ -29,7 +28,8 @@ class ConnectPersonaAuth {
     Future<bool> Function(Uri uri)? canLaunchUrlFn,
     Future<bool> Function(Duration timeout)? waitForAppBackgroundFn,
     WebAuthorizeOpener? webAuthorizeOpener,
-  }) : _parsedRedirectUri = _validateRedirectUri(redirectUri),
+  }) : redirectUri = sdkRedirectUri,
+       _parsedRedirectUri = _parsedSdkRedirectUri,
        _appLinks = appLinks ?? AppLinks(),
        _launchUrl =
            launchUrlFn ??
@@ -42,7 +42,18 @@ class ConnectPersonaAuth {
     if (clientId.isEmpty) {
       throw ArgumentError.value(clientId, 'clientId', 'must not be empty');
     }
+    if (scope.isEmpty) {
+      throw ArgumentError.value(scope, 'scope', 'must not be empty');
+    }
   }
+
+  /// Fixed OAuth redirect URI owned by this SDK.
+  ///
+  /// Register this exact value on every Connect portal client, and wire the
+  /// same scheme/host/path in the host app's Android/iOS deep-link config.
+  static const String sdkRedirectUri = 'loginwithconnect://oauth/callback';
+
+  static final Uri _parsedSdkRedirectUri = Uri.parse(sdkRedirectUri);
 
   static const reservedOAuthKeys = {
     'client_id',
@@ -52,12 +63,16 @@ class ConnectPersonaAuth {
     'state',
   };
 
+  /// Host-supplied OAuth client ID from the Connect developer portal.
   final String clientId;
+
+  /// Fixed SDK redirect URI ([sdkRedirectUri]). Not host-configurable.
   final String redirectUri;
 
   /// Connect auth environment from the host Flutter flavor.
   final ConnectEnvironment environment;
 
+  /// Host-supplied OAuth scope (space-delimited if multiple).
   final String scope;
 
   /// Optional full override for the HTTPS authorize base URL.
@@ -436,7 +451,7 @@ class ConnectPersonaAuth {
     if (!_redirectUriMatches(uri)) {
       throw const ConnectAuthException(
         ConnectAuthException.invalidResponse,
-        'Redirect URI did not match the configured redirectUri',
+        'Redirect URI did not match the SDK redirectUri',
       );
     }
 
@@ -488,25 +503,6 @@ class ConnectPersonaAuth {
       return uri.path == expected.path;
     }
     return true;
-  }
-
-  static Uri _validateRedirectUri(String redirectUri) {
-    if (redirectUri.isEmpty) {
-      throw ArgumentError.value(
-        redirectUri,
-        'redirectUri',
-        'must not be empty',
-      );
-    }
-    final parsed = Uri.tryParse(redirectUri);
-    if (parsed == null || parsed.scheme.isEmpty) {
-      throw ArgumentError.value(
-        redirectUri,
-        'redirectUri',
-        'must be a valid URI with a scheme',
-      );
-    }
-    return parsed;
   }
 
   static String _generateState() {

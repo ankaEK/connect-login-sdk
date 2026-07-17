@@ -5,10 +5,16 @@ Minimal demo for [`login_with_connect`](../).
 ## Setup
 
 1. In [`lib/main.dart`](lib/main.dart), set `kClientId` to a real Connect
-   Persona OAuth client ID for the **stg/uat** environment
-   (`ConnectEnvironment.uat` → `https://uat.connectpersona.com`).
-2. Register `loginwithconnect://oauth/callback` as that client's redirect URI
-   in Connect (must match Android/iOS deep-link config).
+   Persona OAuth client ID for the target environment
+   (example defaults to `ConnectEnvironment.dev` →
+   `https://dev.connectpersona.com`).
+2. Optionally set `kScope` (default `profile.basic`).
+3. On that portal client, register the **SDK fixed** redirect URI:
+
+   `loginwithconnect://oauth/callback`
+
+   (`ConnectPersonaAuth.sdkRedirectUri` — already wired in Android/iOS
+   deep-link config in this example.)
 
 ```bash
 flutter pub get

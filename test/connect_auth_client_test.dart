@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-const _redirectUri = 'https://dev.parking.lahvplus.com/check_account';
+final _redirectUri = ConnectPersonaAuth.sdkRedirectUri;
 
 String _redirectWithCode(String code, {String? state}) {
   final query = state == null ? 'code=$code' : 'code=$code&state=$state';
@@ -58,7 +58,6 @@ void main() {
   }) {
     return ConnectPersonaAuth(
       clientId: 'client_test',
-      redirectUri: _redirectUri,
       environment: environment,
       webAuthorizeBaseUrl: webAuthorizeBaseUrl,
       appLinks: appLinks,
@@ -74,33 +73,31 @@ void main() {
       expect(
         () => ConnectPersonaAuth(
           clientId: '',
-          redirectUri: _redirectUri,
           environment: ConnectEnvironment.dev,
         ),
         throwsArgumentError,
       );
     });
 
-    test('throws for empty redirectUri', () {
+    test('throws for empty scope', () {
       expect(
         () => ConnectPersonaAuth(
           clientId: 'client_test',
-          redirectUri: '',
           environment: ConnectEnvironment.dev,
+          scope: '',
         ),
         throwsArgumentError,
       );
     });
 
-    test('throws for malformed redirectUri', () {
-      expect(
-        () => ConnectPersonaAuth(
-          clientId: 'client_test',
-          redirectUri: 'not-a-valid-uri',
-          environment: ConnectEnvironment.dev,
-        ),
-        throwsArgumentError,
+    test('uses fixed SDK redirect URI', () {
+      final auth = ConnectPersonaAuth(
+        clientId: 'client_test',
+        environment: ConnectEnvironment.dev,
+        scope: 'profile.basic email',
       );
+      expect(auth.redirectUri, ConnectPersonaAuth.sdkRedirectUri);
+      expect(auth.scope, 'profile.basic email');
     });
   });
 
@@ -193,7 +190,6 @@ void main() {
       var webOpened = false;
       final shortAuth = ConnectPersonaAuth(
         clientId: 'client_test',
-        redirectUri: _redirectUri,
         environment: ConnectEnvironment.dev,
         signInTimeout: const Duration(milliseconds: 80),
         canLaunchUrlFn: (_) async => true,
@@ -252,9 +248,9 @@ void main() {
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async => false,
         webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
           openedUrl = url;
-          expect(scheme, 'https');
-          expect(httpsHost, 'dev.parking.lahvplus.com');
-          expect(httpsPath, '/check_account');
+          expect(scheme, 'loginwithconnect');
+          expect(httpsHost, isNull);
+          expect(httpsPath, isNull);
           return _redirectWithCode(
             'abc123',
             state: url.queryParameters['state'],
@@ -505,7 +501,7 @@ void main() {
       final auth = buildAuth();
       expect(
         auth.tryParseAuthorizationCode(
-          Uri.parse('https://dev.parking.lahvplus.com/other?code=xyz'),
+          Uri.parse('loginwithconnect://oauth/other?code=xyz'),
         ),
         isNull,
       );

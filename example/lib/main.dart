@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 
-/// Replace with your Connect Persona OAuth client ID.
-const String kClientId = 'YOUR_CLIENT_ID';
+/// Replace with your Connect Persona OAuth client ID (from the developer portal).
+const String kClientId = 'client_e48a3e01-8481-4cad-8dc0-f97f19004dc6';
 
-/// Must match the redirect URI registered in Connect and in Android/iOS
-/// deep-link config (see example/README.md).
-const String kRedirectUri = 'loginwithconnect://oauth/callback';
+/// Host-supplied OAuth scope. Register matching scopes on the portal client.
+const String kScope = 'profile.basic';
 
 void main() {
   runApp(const MaterialApp(title: 'Connect Sign In', home: SignInDemo()));
@@ -38,12 +37,11 @@ class _SignInDemoState extends State<SignInDemo> {
 
     final auth = ConnectPersonaAuth(
       clientId: kClientId,
-      redirectUri: kRedirectUri,
-      environment: ConnectEnvironment.uat,
+      scope: kScope,
+      environment: ConnectEnvironment.dev,
     );
 
     try {
-      // #docregion SignIn
       final code = await auth.signIn(
         onExternalAppLaunched: () {
           if (!mounted) return;
@@ -53,8 +51,11 @@ class _SignInDemoState extends State<SignInDemo> {
           if (!mounted) return;
           setState(() => _status = 'Using web sign-in…');
         },
+        onAppLaunchFailed: (reason) {
+          if (!mounted) return;
+          setState(() => _status = 'App launch failed: $reason');
+        },
       );
-      // #enddocregion SignIn
 
       if (!mounted) return;
       setState(() {

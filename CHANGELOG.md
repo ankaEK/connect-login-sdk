@@ -1,3 +1,9 @@
+## 0.3.0
+
+* Host supplies `clientId` and `scope`; redirect URI is fixed in the SDK
+  (`ConnectPersonaAuth.sdkRedirectUri` = `loginwithconnect://oauth/callback`).
+* Register that exact redirect on every Connect portal client.
+
 ## 0.2.0
 
 * SDK-owned login routing: try Connect Persona app, then HTTPS web fallback.
