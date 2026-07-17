@@ -5,9 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 
 /// Replace with your Connect Persona OAuth client ID (from the developer portal).
+/// https://developers.connectpersona.com/
 const String kClientId = 'client_e48a3e01-8481-4cad-8dc0-f97f19004dc6';
 
 /// Host-supplied OAuth scope. Register matching scopes on the portal client.
+/// Multiple scopes separated by spaces.
 const String kScope = 'profile.basic';
 
 void main() {
@@ -67,7 +69,7 @@ class _SignInDemoState extends State<SignInDemo> {
   String _tokenCurlFor(String code) {
     return '''
 curl -X 'POST' \\
-  'https://dev.connectpersona.com/api/v1/oauth/token' \\
+  'https://app.connectpersona.com/api/v1/oauth/token' \\
   -H 'accept: application/json' \\
   -H 'Content-Type: application/json' \\
   -d '{
@@ -199,7 +201,9 @@ curl -X 'POST' \\
                   Text(
                     _errorMessage!,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 ],
                 if (code != null) ...[
@@ -246,8 +250,7 @@ curl -X 'POST' \\
                   const SizedBox(height: 8),
                   _CodeBlock(
                     text: _tokenCurlFor(code),
-                    onCopy: () =>
-                        _copyText(_tokenCurlFor(code), isCode: false),
+                    onCopy: () => _copyText(_tokenCurlFor(code), isCode: false),
                     copied: _curlCopied,
                   ),
                   const SizedBox(height: 16),
@@ -276,11 +279,7 @@ curl -X 'POST' \\
 }
 
 class _CodeBlock extends StatelessWidget {
-  const _CodeBlock({
-    required this.text,
-    this.onCopy,
-    this.copied = false,
-  });
+  const _CodeBlock({required this.text, this.onCopy, this.copied = false});
 
   final String text;
   final VoidCallback? onCopy;
@@ -298,7 +297,10 @@ class _CodeBlock extends StatelessWidget {
       child: Stack(
         children: [
           Padding(
-            padding: EdgeInsets.only(top: onCopy != null ? 4 : 0, right: onCopy != null ? 22 : 0),
+            padding: EdgeInsets.only(
+              top: onCopy != null ? 4 : 0,
+              right: onCopy != null ? 22 : 0,
+            ),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SelectableText(
