@@ -25,6 +25,40 @@ class _SignInDemoState extends State<SignInDemo> {
   String? _authCode;
   String? _errorMessage;
 
+  String _tokenCurlFor(String code) {
+    return '''
+curl -X 'POST' \\
+  'https://dev.connectpersona.com/api/v1/oauth/token' \\
+  -H 'accept: application/json' \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+  "client_id": "$kClientId",
+  "client_secret": "*****",
+  "code": "$code"
+}'
+'''
+        .trim();
+  }
+
+  static const _tokenResponseSample = '''
+{
+  "message": "string",
+  "error": 0,
+  "data": {
+    "access_token": "string",
+    "expires_in": 0,
+    "refresh_token": "string",
+    "token_type": "string",
+    "user": {
+      "id": "",
+      "name": "",
+      "email": "",
+      "image": ""
+    }
+  }
+}
+''';
+
   Future<void> _handleSignIn() async {
     if (_signingIn) return;
 
@@ -60,7 +94,7 @@ class _SignInDemoState extends State<SignInDemo> {
       if (!mounted) return;
       setState(() {
         _authCode = code;
-        _status = 'Signed in. Exchange this code on your backend.';
+        _status = 'Signed in';
         _errorMessage = null;
       });
     } on ConnectAuthException catch (e) {
@@ -85,33 +119,99 @@ class _SignInDemoState extends State<SignInDemo> {
 
   @override
   Widget build(BuildContext context) {
+    final code = _authCode;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Connect Sign In')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(_status, textAlign: TextAlign.center),
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _errorMessage!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(_status, textAlign: TextAlign.center),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ],
+                if (code != null) ...[
+                  const SizedBox(height: 20),
+                  SelectableText(
+                    'Code: $code',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Valid for 1 minute',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Use the following request to fetch full user details',
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('CURL:'),
+                  const SizedBox(height: 8),
+                  _CodeBlock(text: _tokenCurlFor(code)),
+                  const SizedBox(height: 16),
+                  const Text('Response:'),
+                  const SizedBox(height: 8),
+                  const _CodeBlock(text: _tokenResponseSample),
+                ],
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: _signingIn ? null : _handleSignIn,
+                  child: Text(
+                    _signingIn
+                        ? 'SIGNING IN…'
+                        : code != null
+                        ? 'SIGN IN AGAIN'
+                        : 'SIGN IN',
+                  ),
                 ),
               ],
-              if (_authCode != null) ...[
-                const SizedBox(height: 12),
-                SelectableText(_authCode!, textAlign: TextAlign.center),
-              ],
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _signingIn ? null : _handleSignIn,
-                child: Text(_signingIn ? 'SIGNING IN…' : 'SIGN IN'),
-              ),
-            ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CodeBlock extends StatelessWidget {
+  const _CodeBlock({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SelectableText(
+          text.trim(),
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 12,
+            color: Color(0xFFE8E8E8),
+            height: 1.4,
           ),
         ),
       ),
