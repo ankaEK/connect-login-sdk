@@ -95,7 +95,7 @@ class ConnectPersonaAuth {
   ///
   /// Register this exact value on every Connect portal client, and wire the
   /// same scheme/host/path in the host app's Android/iOS deep-link config.
-  static const String sdkRedirectUri = 'loginwithconnect://oauth/callback';
+  static const String sdkRedirectUri = 'e48a3e01-8481-4cad-8dc0-f97f19004dc6://oauth/callback';
 
   static final Uri _parsedSdkRedirectUri = Uri.parse(sdkRedirectUri);
 
