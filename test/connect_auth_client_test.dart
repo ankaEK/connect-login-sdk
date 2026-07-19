@@ -44,9 +44,9 @@ void main() {
     AppLinksPlatform.instance = FakeAppLinksPlatform();
   });
 
-  tearDown(() {
+  tearDown(() async {
     AppLinksPlatform.instance = originalAppLinksPlatform;
-    ConnectPersonaAuth.debugSetPersistedOAuthState(null);
+    await ConnectPersonaAuth.debugSetPersistedOAuthState(null);
   });
 
   ConnectPersonaAuth buildAuth({
@@ -250,7 +250,7 @@ void main() {
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async => false,
         webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
           openedUrl = url;
-          expect(scheme, 'loginwithconnect');
+          expect(scheme, Uri.parse(ConnectPersonaAuth.sdkRedirectUri).scheme);
           expect(httpsHost, isNull);
           expect(httpsPath, isNull);
           return _redirectWithCode(
@@ -636,12 +636,12 @@ void main() {
   });
 
   group('recoverAuthorizationCode', () {
-    tearDown(() {
-      ConnectPersonaAuth.debugSetPersistedOAuthState(null);
+    tearDown(() async {
+      await ConnectPersonaAuth.debugSetPersistedOAuthState(null);
     });
 
     test('returns null when no persisted state', () async {
-      ConnectPersonaAuth.debugSetPersistedOAuthState(null);
+      await ConnectPersonaAuth.debugSetPersistedOAuthState(null);
       AppLinksPlatform.instance = FakeAppLinksPlatform(
         initialLink: Uri.parse(_redirectWithCode('x', state: 's')),
       );
@@ -650,7 +650,7 @@ void main() {
 
     test('recovers code when initial link matches persisted state', () async {
       const state = 'cold-start-state';
-      ConnectPersonaAuth.debugSetPersistedOAuthState(state);
+      await ConnectPersonaAuth.debugSetPersistedOAuthState(state);
       AppLinksPlatform.instance = FakeAppLinksPlatform(
         initialLink: Uri.parse(
           _redirectWithCode('recovered-code', state: state),
@@ -666,7 +666,7 @@ void main() {
     });
 
     test('ignores initial link when state does not match', () async {
-      ConnectPersonaAuth.debugSetPersistedOAuthState('expected');
+      await ConnectPersonaAuth.debugSetPersistedOAuthState('expected');
       AppLinksPlatform.instance = FakeAppLinksPlatform(
         initialLink: Uri.parse(
           _redirectWithCode('nope', state: 'other'),

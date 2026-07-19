@@ -17,7 +17,7 @@
 			<string>com.example.example.oauth</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>loginwithconnect</string>
+				<string>e48a3e01-8481-4cad-8dc0-f97f19004dc6</string>
 			</array>
 		</dict>
 	</array>

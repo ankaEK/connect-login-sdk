@@ -26,7 +26,7 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data
-                    android:scheme="loginwithconnect"
+                    android:scheme="e48a3e01-8481-4cad-8dc0-f97f19004dc6"
                     android:host="oauth"
                     android:pathPrefix="/callback"/>
             </intent-filter>
