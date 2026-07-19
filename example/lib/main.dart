@@ -6,7 +6,7 @@ import 'package:login_with_connect/login_with_connect.dart';
 
 /// Replace with your Connect Persona OAuth client ID (from the developer portal).
 /// https://developers.connectpersona.com/
-const String kClientId = 'client_e48a3e01-8481-4cad-8dc0-f97f19004dc6';
+const String kClientId = 'e48a3e01-8481-4cad-8dc0-f97f19004dc6';
 
 /// Host-supplied OAuth scope. Register matching scopes on the portal client.
 /// Multiple scopes separated by spaces.
