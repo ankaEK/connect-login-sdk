@@ -8,7 +8,7 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:url_launcher/url_launcher.dart';
-
+import 'package:path_provider/path_provider.dart';
 import 'connect_auth_exception.dart';
 import 'connect_environment.dart';
 
@@ -16,31 +16,65 @@ void _log(String message) {
   developer.log(message, name: 'ConnectPersonaAuth');
 }
 
-File get _pendingOAuthStateFile =>
-    File('${Directory.systemTemp.path}/login_with_connect_oauth_state');
+File? _cachedPendingOAuthStateFile;
+Future<File>? _pendingOAuthStateFileResolve;
 
-void _persistOAuthState(String state) {
+Future<File> _pendingOAuthStateFile() {
+  final cached = _cachedPendingOAuthStateFile;
+  if (cached != null) return Future<File>.value(cached);
+
+  return _pendingOAuthStateFileResolve ??= () async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      return _cachedPendingOAuthStateFile = File(
+        '${dir.path}/login_with_connect_oauth_state',
+      );
+    } catch (e) {
+      _log('path_provider unavailable, falling back to systemTemp: $e');
+      return _cachedPendingOAuthStateFile = File(
+        '${Directory.systemTemp.path}/login_with_connect_oauth_state',
+      );
+    }
+  }();
+}
+
+Future<void> _persistOAuthState(String state) async {
   try {
-    _pendingOAuthStateFile.writeAsStringSync(state, flush: true);
+    final file = await _pendingOAuthStateFile();
+    await file.writeAsString(state, flush: true);
   } catch (e) {
     _log('Failed to persist oauth state: $e');
   }
 }
 
-void _clearPersistedOAuthState() {
+void _clearPersistedOAuthStateSync() {
+  final cached = _cachedPendingOAuthStateFile;
+  if (cached == null) return;
   try {
-    if (_pendingOAuthStateFile.existsSync()) {
-      _pendingOAuthStateFile.deleteSync();
+    if (cached.existsSync()) {
+      cached.deleteSync();
     }
   } catch (e) {
     _log('Failed to clear oauth state: $e');
   }
 }
 
-String? _readPersistedOAuthState() {
+Future<void> _clearPersistedOAuthState() async {
   try {
-    if (!_pendingOAuthStateFile.existsSync()) return null;
-    final value = _pendingOAuthStateFile.readAsStringSync().trim();
+    final file = await _pendingOAuthStateFile();
+    if (file.existsSync()) {
+      file.deleteSync();
+    }
+  } catch (e) {
+    _log('Failed to clear oauth state: $e');
+  }
+}
+
+Future<String?> _readPersistedOAuthState() async {
+  try {
+    final file = await _pendingOAuthStateFile();
+    if (!file.existsSync()) return null;
+    final value = file.readAsStringSync().trim();
     return value.isEmpty ? null : value;
   } catch (e) {
     _log('Failed to read oauth state: $e');
@@ -95,7 +129,8 @@ class ConnectPersonaAuth {
   ///
   /// Register this exact value on every Connect portal client, and wire the
   /// same scheme/host/path in the host app's Android/iOS deep-link config.
-  static const String sdkRedirectUri = 'e48a3e01-8481-4cad-8dc0-f97f19004dc6://oauth/callback';
+  static const String sdkRedirectUri =
+      'e48a3e01-8481-4cad-8dc0-f97f19004dc6://oauth/callback';
 
   static final Uri _parsedSdkRedirectUri = Uri.parse(sdkRedirectUri);
 
@@ -107,7 +142,7 @@ class ConnectPersonaAuth {
   ///
   /// Requires that [signIn] had started earlier (state was persisted).
   static Future<String?> recoverAuthorizationCode({AppLinks? appLinks}) async {
-    final expected = _readPersistedOAuthState();
+    final expected = await _readPersistedOAuthState();
     if (expected == null) {
       _log('recoverAuthorizationCode: no persisted state');
       return null;
@@ -134,7 +169,7 @@ class ConnectPersonaAuth {
 
       final error = uri.queryParameters['error'];
       if (error != null) {
-        _clearPersistedOAuthState();
+        _clearPersistedOAuthStateSync();
         throw ConnectAuthException(
           error == 'access_denied'
               ? ConnectAuthException.accessDenied
@@ -148,7 +183,7 @@ class ConnectPersonaAuth {
       final code = uri.queryParameters['code'];
       if (code != null && code.isNotEmpty) {
         _log('recoverAuthorizationCode: recovered code from $uri');
-        _clearPersistedOAuthState();
+        _clearPersistedOAuthStateSync();
         return code;
       }
     }
@@ -158,11 +193,11 @@ class ConnectPersonaAuth {
 
   /// Test helper to seed / clear persisted OAuth state.
   @visibleForTesting
-  static void debugSetPersistedOAuthState(String? state) {
+  static Future<void> debugSetPersistedOAuthState(String? state) async {
     if (state == null || state.isEmpty) {
-      _clearPersistedOAuthState();
+      await _clearPersistedOAuthState();
     } else {
-      _persistOAuthState(state);
+      await _persistOAuthState(state);
     }
   }
 
@@ -323,7 +358,7 @@ class ConnectPersonaAuth {
     _signInInProgress = true;
     final state = _generateState();
     _expectedState = state;
-    _persistOAuthState(state);
+    await _persistOAuthState(state);
 
     try {
       final launched = await openAuthorizeScreen(
@@ -350,7 +385,14 @@ class ConnectPersonaAuth {
     } finally {
       _signInInProgress = false;
       _expectedState = null;
-      _clearPersistedOAuthState();
+      // Do not await path_provider here: after returning from Connect the
+      // MethodChannel can stall and leave the host on a blank/loading screen.
+      // Persist already warmed [_cachedPendingOAuthStateFile]; clear sync.
+      if (_cachedPendingOAuthStateFile != null) {
+        _clearPersistedOAuthStateSync();
+      } else {
+        unawaited(_clearPersistedOAuthState());
+      }
     }
   }
 
