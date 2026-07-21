@@ -122,10 +122,7 @@ class ConnectPersonaAuth {
   }
 
   /// OAuth redirect URI for [clientId]: `{clientId}://oauth/callback`.
-  ///
-  /// [clientId] must be a valid URI scheme (letters, digits, `+`, `-`, `.`;
-  /// no `_`). Prefer portal ids like `cp-6d009906-…`.
-  ///
+  
   /// Register this exact value on the Connect portal client, and wire the same
   /// scheme/host/path in the host app's Android/iOS deep-link config.
   static String redirectUriForClientId(String clientId) =>
@@ -134,9 +131,6 @@ class ConnectPersonaAuth {
   /// Recovers an authorization code after the host process was killed while
   /// Connect was open (cold start via deep link).
   ///
-  /// Pass the same [clientId] used for [ConnectPersonaAuth]. Call from host
-  /// `initState` / startup. Returns `null` when there is no matching pending
-  /// redirect. Clears the persisted OAuth `state` on success.
   ///
   /// Requires that [signIn] had started earlier (state was persisted).
   static Future<String?> recoverAuthorizationCode({

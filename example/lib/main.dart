@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 
 /// Replace with your Connect Persona OAuth client ID (from the developer portal).
-/// Must be a valid URI scheme (e.g. `cp-…`); redirect is `{kClientId}://oauth/callback`.
 /// https://developers.connectpersona.com/
 const String kClientId = 'e48a3e01-8481-4cad-8dc0-f97f19004dc6';
 
