@@ -14,10 +14,9 @@ fails), the SDK falls back to HTTPS web authorize. Hosts should not catch
 - **Host supplies:** `clientId`, `scope`, and `ConnectEnvironment` (from flavor).
 - **Redirect URI:** derived from `clientId` via
   `ConnectPersonaAuth.redirectUriForClientId` —
-  `{clientId}://oauth/callback`. Hosts must register that exact URI on their
-  Connect portal client and wire matching deep links. Deep-link matching uses
-  string parsing because Dart `Uri` rejects schemes containing `_`
-  (as in typical `client_…` IDs).
+  `{clientId}://oauth/callback`. [clientId] must be a valid URI scheme
+  (prefer `cp-…`). Hosts register that exact URI on their portal client and
+  wire matching deep links.
 
 ## Environment vs product params
 

@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-const _clientId = 'client_test';
+const _clientId = 'cp-test';
 final _redirectUri = ConnectPersonaAuth.redirectUriForClientId(_clientId);
 
 String _redirectWithCode(String code, {String? state}) {
@@ -18,30 +18,31 @@ class FakeAppLinksPlatform extends AppLinksPlatform {
   FakeAppLinksPlatform({
     this.initialLink,
     this.latestLink,
-    Stream<String>? stringLinkStream,
-  }) : _stringLinkStream = stringLinkStream ?? const Stream.empty();
+    Stream<Uri>? uriLinkStream,
+  }) : _uriLinkStream = uriLinkStream ?? const Stream.empty();
 
-  String? initialLink;
-  String? latestLink;
-  final Stream<String> _stringLinkStream;
-
-  @override
-  Future<String?> getInitialLinkString() async => initialLink;
+  Uri? initialLink;
+  Uri? latestLink;
+  final Stream<Uri> _uriLinkStream;
 
   @override
-  Future<String?> getLatestLinkString() async => latestLink;
+  Future<Uri?> getInitialLink() async => initialLink;
 
   @override
-  Stream<String> get stringLinkStream => _stringLinkStream;
+  Future<Uri?> getLatestLink() async => latestLink;
 
   @override
-  Future<Uri?> getInitialLink() async => null;
+  Stream<Uri> get uriLinkStream => _uriLinkStream;
 
   @override
-  Future<Uri?> getLatestLink() async => null;
+  Future<String?> getInitialLinkString() async => initialLink?.toString();
 
   @override
-  Stream<Uri> get uriLinkStream => const Stream.empty();
+  Future<String?> getLatestLinkString() async => latestLink?.toString();
+
+  @override
+  Stream<String> get stringLinkStream =>
+      _uriLinkStream.map((uri) => uri.toString());
 }
 
 void main() {
@@ -447,9 +448,9 @@ void main() {
     });
 
     test('resolves deep link delivered after resume without cancelling', () async {
-      final linkController = StreamController<String>.broadcast();
+      final linkController = StreamController<Uri>.broadcast();
       final fakePlatform = FakeAppLinksPlatform(
-        stringLinkStream: linkController.stream,
+        uriLinkStream: linkController.stream,
       );
       AppLinksPlatform.instance = fakePlatform;
       String? capturedState;
@@ -475,7 +476,7 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 700));
       linkController.add(
-        _redirectWithCode('delayed-code', state: capturedState),
+        Uri.parse(_redirectWithCode('delayed-code', state: capturedState)),
       );
 
       expect(await signInFuture, 'delayed-code');
@@ -484,10 +485,12 @@ void main() {
     });
 
     test('ignores stale redirect with wrong state then accepts matching', () async {
-      final linkController = StreamController<String>.broadcast();
+      final linkController = StreamController<Uri>.broadcast();
       final fakePlatform = FakeAppLinksPlatform(
-        initialLink: _redirectWithCode('stale-code', state: 'old-state'),
-        stringLinkStream: linkController.stream,
+        initialLink: Uri.parse(
+          _redirectWithCode('stale-code', state: 'old-state'),
+        ),
+        uriLinkStream: linkController.stream,
       );
       AppLinksPlatform.instance = fakePlatform;
       String? capturedState;
@@ -509,12 +512,12 @@ void main() {
 
       // Stale callback (wrong state) must not complete with state_mismatch.
       linkController.add(
-        _redirectWithCode('stale-code', state: 'old-state'),
+        Uri.parse(_redirectWithCode('stale-code', state: 'old-state')),
       );
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       linkController.add(
-        _redirectWithCode('fresh-code', state: capturedState),
+        Uri.parse(_redirectWithCode('fresh-code', state: capturedState)),
       );
 
       expect(await signInFuture, 'fresh-code');
@@ -523,10 +526,10 @@ void main() {
     });
 
     test('ignores stale redirect missing state then accepts matching', () async {
-      final linkController = StreamController<String>.broadcast();
+      final linkController = StreamController<Uri>.broadcast();
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        latestLink: '$_redirectUri?code=stale-no-state',
-        stringLinkStream: linkController.stream,
+        latestLink: Uri.parse('$_redirectUri?code=stale-no-state'),
+        uriLinkStream: linkController.stream,
       );
       String? capturedState;
 
@@ -546,7 +549,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Missing state must not fail the session with state_mismatch.
-      linkController.add('$_redirectUri?code=stale-no-state');
+      linkController.add(Uri.parse('$_redirectUri?code=stale-no-state'));
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
@@ -555,7 +558,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 400));
 
       linkController.add(
-        _redirectWithCode('fresh-code', state: capturedState),
+        Uri.parse(_redirectWithCode('fresh-code', state: capturedState)),
       );
 
       expect(await signInFuture, 'fresh-code');
@@ -567,16 +570,16 @@ void main() {
   group('parseAuthorizationCode', () {
     test('returns code for matching redirect', () {
       final auth = buildAuth();
-      final code = auth.parseAuthorizationCodeFromString(
-        '$_redirectUri?code=xyz',
+      final code = auth.parseAuthorizationCode(
+        Uri.parse('$_redirectUri?code=xyz'),
       );
       expect(code, 'xyz');
     });
 
     test('tryParse ignores wrong state while sign-in expects another', () async {
-      final linkController = StreamController<String>.broadcast();
+      final linkController = StreamController<Uri>.broadcast();
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        stringLinkStream: linkController.stream,
+        uriLinkStream: linkController.stream,
       );
       String? capturedState;
       final auth = buildAuth(
@@ -596,20 +599,20 @@ void main() {
       expect(capturedState, isNotEmpty);
 
       expect(
-        auth.tryParseAuthorizationCodeFromString(
-          '$_redirectUri?code=x&state=other',
+        auth.tryParseAuthorizationCode(
+          Uri.parse('$_redirectUri?code=x&state=other'),
         ),
         isNull,
       );
       expect(
-        auth.tryParseAuthorizationCodeFromString(
-          '$_redirectUri?code=x',
+        auth.tryParseAuthorizationCode(
+          Uri.parse('$_redirectUri?code=x'),
         ),
         isNull,
       );
 
       linkController.add(
-        _redirectWithCode('ok', state: capturedState),
+        Uri.parse(_redirectWithCode('ok', state: capturedState)),
       );
       expect(await future, 'ok');
       await linkController.close();
@@ -619,8 +622,8 @@ void main() {
     test('maps access_denied', () {
       final auth = buildAuth();
       expect(
-        () => auth.parseAuthorizationCodeFromString(
-          '$_redirectUri?error=access_denied',
+        () => auth.parseAuthorizationCode(
+          Uri.parse('$_redirectUri?error=access_denied'),
         ),
         throwsA(
           isA<ConnectAuthException>().having(
@@ -635,8 +638,8 @@ void main() {
     test('rejects redirect with wrong path', () {
       final auth = buildAuth();
       expect(
-        auth.tryParseAuthorizationCodeFromString(
-          'loginwithconnect://oauth/other?code=xyz',
+        auth.tryParseAuthorizationCode(
+          Uri.parse('$_clientId://oauth/other?code=xyz'),
         ),
         isNull,
       );
@@ -651,7 +654,7 @@ void main() {
     test('returns null when no persisted state', () async {
       await ConnectPersonaAuth.debugSetPersistedOAuthState(null);
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        initialLink: _redirectWithCode('x', state: 's'),
+        initialLink: Uri.parse(_redirectWithCode('x', state: 's')),
       );
       expect(await ConnectPersonaAuth.recoverAuthorizationCode(clientId: _clientId), isNull);
     });
@@ -660,7 +663,9 @@ void main() {
       const state = 'cold-start-state';
       await ConnectPersonaAuth.debugSetPersistedOAuthState(state);
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        initialLink: _redirectWithCode('recovered-code', state: state),
+        initialLink: Uri.parse(
+          _redirectWithCode('recovered-code', state: state),
+        ),
       );
 
       expect(
@@ -674,7 +679,7 @@ void main() {
     test('ignores initial link when state does not match', () async {
       await ConnectPersonaAuth.debugSetPersistedOAuthState('expected');
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        initialLink: _redirectWithCode('nope', state: 'other'),
+        initialLink: Uri.parse(_redirectWithCode('nope', state: 'other')),
       );
       expect(await ConnectPersonaAuth.recoverAuthorizationCode(clientId: _clientId), isNull);
     });

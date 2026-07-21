@@ -90,10 +90,11 @@ flutter pub get
    {clientId}://oauth/callback
    ```
 
-   Example: if `clientId` is `client_6d009906-…`, register
-   `client_6d009906-…://oauth/callback`.
+   Example: if `clientId` is `cp-6d009906-…`, register
+   `cp-6d009906-…://oauth/callback`.
 
-   Helper: `ConnectPersonaAuth.redirectUriForClientId(clientId)`.
+   [clientId] must be a valid URI scheme (letters, digits, `+`, `-`, `.`;
+   no `_`). Helper: `ConnectPersonaAuth.redirectUriForClientId(clientId)`.
 
 4. Note your **Client ID**. Keep **Client Secret** on the server only.
 5. Enable the scopes your app will request (for example `profile.basic`).

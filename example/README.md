@@ -24,6 +24,7 @@ pattern documented in the [root README](../README.md).
    {kClientId}://oauth/callback
    ```
 
+   Use a scheme-safe client id (e.g. `cp-…`, no `_`).
    (`ConnectPersonaAuth.redirectUriForClientId(kClientId)` — already wired in
    this example’s Android and iOS config.)
 

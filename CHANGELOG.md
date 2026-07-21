@@ -1,30 +1,23 @@
-## 0.4.0
+## 0.3.2
 
-* **Breaking:** redirect URI is derived from host `clientId` as
-  `{clientId}://oauth/callback` (`ConnectPersonaAuth.redirectUriForClientId`).
-  Removed fixed `ConnectPersonaAuth.sdkRedirectUri`.
-* `recoverAuthorizationCode` now requires `clientId`.
-* Deep-link handling uses string APIs so schemes with `_` (e.g. `client_…`)
-  work (Dart `Uri` rejects those schemes).
+* Cold-start recovery: persist OAuth `state` during `signIn`; host can call
+  `ConnectPersonaAuth.recoverAuthorizationCode(clientId: …)` after process death.
+* Ignore stale redirects with missing/wrong `state` while waiting.
+* Redirect URI derived from host `clientId` as `{clientId}://oauth/callback`
+  (`ConnectPersonaAuth.redirectUriForClientId`). Use a scheme-safe id
+  (e.g. `cp-…`); no `_` in the scheme.
+* Example recovers code on startup; disable Impeller on Android example
+  (black screen / 0×0 viewport on some GPUs).
 
 ## 0.3.1
 
 * Fix native `state_mismatch` on resume: ignore stale `getInitialLink` callbacks
   and non-matching prior `state` values; only accept the current sign-in state.
 
-## 0.3.2
-
-* Cold-start recovery: persist OAuth `state` during `signIn`; host can call
-  `ConnectPersonaAuth.recoverAuthorizationCode()` after process death.
-* Ignore stale redirects with missing/wrong `state` while waiting.
-* Example recovers code on startup; disable Impeller on Android example
-  (black screen / 0×0 viewport on some GPUs).
-
 ## 0.3.0
 
-* Host supplies `clientId` and `scope`; redirect URI is fixed in the SDK
-  (`ConnectPersonaAuth.sdkRedirectUri` = `loginwithconnect://oauth/callback`).
-* Register that exact redirect on every Connect portal client.
+* Host supplies `clientId` and `scope`.
+* Register redirect `{clientId}://oauth/callback` on the Connect portal client.
 
 ## 0.2.0
 
