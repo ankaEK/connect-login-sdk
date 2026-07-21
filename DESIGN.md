@@ -12,9 +12,12 @@ fails), the SDK falls back to HTTPS web authorize. Hosts should not catch
 ## Host vs SDK OAuth config
 
 - **Host supplies:** `clientId`, `scope`, and `ConnectEnvironment` (from flavor).
-- **SDK owns:** fixed `redirectUri` = `ConnectPersonaAuth.sdkRedirectUri`
-  (`loginwithconnect://oauth/callback`). Hosts must register this exact URI
-  on their Connect portal client and wire matching deep links.
+- **Redirect URI:** derived from `clientId` via
+  `ConnectPersonaAuth.redirectUriForClientId` —
+  `{clientId}://oauth/callback`. Hosts must register that exact URI on their
+  Connect portal client and wire matching deep links. Deep-link matching uses
+  string parsing because Dart `Uri` rejects schemes containing `_`
+  (as in typical `client_…` IDs).
 
 ## Environment vs product params
 
@@ -32,14 +35,14 @@ that need in-app interception (escape hatch only).
 
 ## Deep links and state
 
-App success returns via the fixed SDK `redirectUri` and `app_links`.
+App success returns via the client-derived `redirectUri` and `app_links`.
 While waiting, redirects with missing/wrong `state` are ignored (stale
 callbacks) so they cannot fail the in-progress `signIn` with
 `state_mismatch`. Only a callback whose `state` matches the current attempt
 completes (or errors like `access_denied` for that attempt).
 
 If Android kills the host while Connect is open, call
-`ConnectPersonaAuth.recoverAuthorizationCode()` on startup (see example).
+`ConnectPersonaAuth.recoverAuthorizationCode(clientId: …)` on startup (see example).
 `signIn` persists OAuth `state` so a cold-start deep link can still be verified.
 `webQueryParams` are applied to both the native app deep link and the HTTPS
 authorize URL.
@@ -69,6 +72,6 @@ sign-in are ignored so a previous session cannot raise a false `state_mismatch`.
 
 - Sign In button with status / errors / auth code
 - Sample token-exchange `curl` + response shape (secret redacted)
-- `recoverAuthorizationCode()` on startup for Android process death
-- Redirect `loginwithconnect://oauth/callback` wired on Android and iOS
+- `recoverAuthorizationCode(clientId: …)` on startup for Android process death
+- Redirect `{clientId}://oauth/callback` wired on Android and iOS
 - Optional Impeller disable on Android (example GPU workaround only)

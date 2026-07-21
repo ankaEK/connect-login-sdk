@@ -1,6 +1,6 @@
 name: login_with_connect
 description: Flutter package to sign in with Connect Persona (app first, web fallback).
-version: 0.3.2
+version: 0.4.0
 homepage: https://github.com/ankaEK/connect-login-sdk
 repository: https://github.com/ankaEK/connect-login-sdk
 

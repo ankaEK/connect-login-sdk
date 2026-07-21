@@ -82,15 +82,81 @@ Future<String?> _readPersistedOAuthState() async {
   }
 }
 
-bool _sdkRedirectMatches(Uri uri) {
-  final expected = ConnectPersonaAuth._parsedSdkRedirectUri;
-  if (uri.scheme != expected.scheme || uri.host != expected.host) {
-    return false;
+/// Parsed OAuth callback link. Uses string parsing so custom schemes that Dart
+/// [Uri] rejects (e.g. underscore in `client_…`) can still be matched.
+class _CallbackLink {
+  const _CallbackLink({
+    required this.scheme,
+    required this.host,
+    required this.path,
+    required this.queryParameters,
+  });
+
+  final String scheme;
+  final String host;
+  final String path;
+  final Map<String, String> queryParameters;
+
+  static _CallbackLink? tryParse(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
+      return _CallbackLink(
+        scheme: uri.scheme,
+        host: uri.host,
+        path: uri.path,
+        queryParameters: uri.queryParameters,
+      );
+    }
+
+    final schemeSep = trimmed.indexOf('://');
+    if (schemeSep <= 0) return null;
+    final scheme = trimmed.substring(0, schemeSep);
+    if (scheme.isEmpty) return null;
+
+    var rest = trimmed.substring(schemeSep + 3);
+    var query = '';
+    final q = rest.indexOf('?');
+    if (q >= 0) {
+      query = rest.substring(q + 1);
+      rest = rest.substring(0, q);
+    }
+
+    final slash = rest.indexOf('/');
+    final String host;
+    final String path;
+    if (slash < 0) {
+      host = rest;
+      path = '';
+    } else {
+      host = rest.substring(0, slash);
+      path = rest.substring(slash);
+    }
+    if (host.isEmpty) return null;
+
+    return _CallbackLink(
+      scheme: scheme,
+      host: host,
+      path: path,
+      queryParameters: query.isEmpty
+          ? const <String, String>{}
+          : Uri.splitQueryString(query),
+    );
   }
-  if (expected.path.isNotEmpty && expected.path != '/') {
-    return uri.path == expected.path;
+
+  bool matchesRedirect({
+    required String scheme,
+    required String host,
+    required String path,
+  }) {
+    if (this.scheme != scheme || this.host != host) return false;
+    if (path.isNotEmpty && path != '/') {
+      return this.path == path;
+    }
+    return true;
   }
-  return true;
 }
 
 class ConnectPersonaAuth {
@@ -106,8 +172,8 @@ class ConnectPersonaAuth {
     Future<bool> Function(Uri uri)? canLaunchUrlFn,
     Future<bool> Function(Duration timeout)? waitForAppBackgroundFn,
     WebAuthorizeOpener? webAuthorizeOpener,
-  }) : redirectUri = sdkRedirectUri,
-       _parsedRedirectUri = _parsedSdkRedirectUri,
+  }) : redirectUri = redirectUriForClientId(clientId),
+       _redirectScheme = clientId,
        _appLinks = appLinks ?? AppLinks(),
        _launchUrl =
            launchUrlFn ??
@@ -125,40 +191,54 @@ class ConnectPersonaAuth {
     }
   }
 
-  /// Fixed OAuth redirect URI owned by this SDK.
-  ///
-  /// Register this exact value on every Connect portal client, and wire the
-  /// same scheme/host/path in the host app's Android/iOS deep-link config.
-  static const String sdkRedirectUri =
-      'e48a3e01-8481-4cad-8dc0-f97f19004dc6://oauth/callback';
+  static const String _redirectHost = 'oauth';
+  static const String _redirectPath = '/callback';
 
-  static final Uri _parsedSdkRedirectUri = Uri.parse(sdkRedirectUri);
+  /// OAuth redirect URI for [clientId]: `{clientId}://oauth/callback`.
+  ///
+  /// Register this exact value on the Connect portal client, and wire the same
+  /// scheme/host/path in the host app's Android/iOS deep-link config.
+  static String redirectUriForClientId(String clientId) =>
+      '$clientId://$_redirectHost$_redirectPath';
 
   /// Recovers an authorization code after the host process was killed while
   /// Connect was open (cold start via deep link).
   ///
-  /// Call from host `initState` / startup. Returns `null` when there is no
-  /// matching pending redirect. Clears the persisted OAuth `state` on success.
+  /// Pass the same [clientId] used for [ConnectPersonaAuth]. Call from host
+  /// `initState` / startup. Returns `null` when there is no matching pending
+  /// redirect. Clears the persisted OAuth `state` on success.
   ///
   /// Requires that [signIn] had started earlier (state was persisted).
-  static Future<String?> recoverAuthorizationCode({AppLinks? appLinks}) async {
+  static Future<String?> recoverAuthorizationCode({
+    required String clientId,
+    AppLinks? appLinks,
+  }) async {
     final expected = await _readPersistedOAuthState();
     if (expected == null) {
       _log('recoverAuthorizationCode: no persisted state');
       return null;
     }
 
+    final scheme = clientId;
     final links = appLinks ?? AppLinks();
-    final candidates = <Uri?>[
-      await links.getInitialLink(),
-      await links.getLatestLink(),
+    final candidates = <String?>[
+      await links.getInitialLinkString(),
+      await links.getLatestLinkString(),
     ];
 
-    for (final uri in candidates) {
-      if (uri == null) continue;
-      if (!_sdkRedirectMatches(uri)) continue;
+    for (final raw in candidates) {
+      if (raw == null) continue;
+      final link = _CallbackLink.tryParse(raw);
+      if (link == null) continue;
+      if (!link.matchesRedirect(
+        scheme: scheme,
+        host: _redirectHost,
+        path: _redirectPath,
+      )) {
+        continue;
+      }
 
-      final returnedState = uri.queryParameters['state'];
+      final returnedState = link.queryParameters['state'];
       if (returnedState != expected) {
         _log(
           'recoverAuthorizationCode: ignore uri (expected=$expected, '
@@ -167,7 +247,7 @@ class ConnectPersonaAuth {
         continue;
       }
 
-      final error = uri.queryParameters['error'];
+      final error = link.queryParameters['error'];
       if (error != null) {
         _clearPersistedOAuthStateSync();
         throw ConnectAuthException(
@@ -176,13 +256,13 @@ class ConnectPersonaAuth {
               : error == 'cancelled' || error == 'user_cancelled'
               ? ConnectAuthException.cancelled
               : ConnectAuthException.invalidResponse,
-          uri.queryParameters['error_description'] ?? error,
+          link.queryParameters['error_description'] ?? error,
         );
       }
 
-      final code = uri.queryParameters['code'];
+      final code = link.queryParameters['code'];
       if (code != null && code.isNotEmpty) {
-        _log('recoverAuthorizationCode: recovered code from $uri');
+        _log('recoverAuthorizationCode: recovered code from $raw');
         _clearPersistedOAuthStateSync();
         return code;
       }
@@ -212,7 +292,7 @@ class ConnectPersonaAuth {
   /// Host-supplied OAuth client ID from the Connect developer portal.
   final String clientId;
 
-  /// Fixed SDK redirect URI ([sdkRedirectUri]). Not host-configurable.
+  /// OAuth redirect URI derived from [clientId] via [redirectUriForClientId].
   final String redirectUri;
 
   /// Connect auth environment from the host Flutter flavor.
@@ -230,14 +310,14 @@ class ConnectPersonaAuth {
   /// How long to wait after launchUrl for the host to background (Connect opened).
   final Duration launchHandoffTimeout;
 
-  final Uri _parsedRedirectUri;
+  final String _redirectScheme;
   final AppLinks _appLinks;
   final Future<bool> Function(Uri uri, {LaunchMode mode}) _launchUrl;
   final Future<bool> Function(Uri uri) _canLaunchUrl;
   final Future<bool> Function(Duration timeout) _waitForAppBackground;
   final WebAuthorizeOpener _webAuthorizeOpener;
 
-  StreamSubscription<Uri>? _linkSubscription;
+  StreamSubscription<String>? _linkSubscription;
   String? _expectedState;
   bool _signInInProgress = false;
 
@@ -433,13 +513,12 @@ class ConnectPersonaAuth {
         return _requireCode(code);
       }
 
-      final redirect = _parsedRedirectUri;
       final result =
           await _webAuthorizeOpener(
             url,
-            redirect.scheme,
-            httpsHost: redirect.scheme == 'https' ? redirect.host : null,
-            httpsPath: redirect.scheme == 'https' ? redirect.path : null,
+            _redirectScheme,
+            httpsHost: _redirectScheme == 'https' ? _redirectHost : null,
+            httpsPath: _redirectScheme == 'https' ? _redirectPath : null,
           ).timeout(
             signInTimeout,
             onTimeout: () => throw const ConnectAuthException(
@@ -448,7 +527,7 @@ class ConnectPersonaAuth {
             ),
           );
 
-      return parseAuthorizationCode(Uri.parse(result));
+      return parseAuthorizationCodeFromString(result);
     } on ConnectAuthException {
       rethrow;
     } on TimeoutException {
@@ -483,11 +562,11 @@ class ConnectPersonaAuth {
     }
 
     if (listenForRedirect) {
-      _linkSubscription = _appLinks.uriLinkStream.listen(
-        (uri) {
+      _linkSubscription = _appLinks.stringLinkStream.listen(
+        (raw) {
           if (completer.isCompleted) return;
           try {
-            final code = tryParseAuthorizationCode(uri);
+            final code = tryParseAuthorizationCodeFromString(raw);
             if (code != null) completer.complete(code);
           } on ConnectAuthException catch (e) {
             if (!completer.isCompleted) completer.completeError(e);
@@ -593,10 +672,10 @@ class ConnectPersonaAuth {
   }) async {
     if (completer.isCompleted) return;
 
-    void apply(Uri? uri) {
-      if (uri == null || completer.isCompleted) return;
+    void apply(String? raw) {
+      if (raw == null || completer.isCompleted) return;
       try {
-        final code = tryParseAuthorizationCode(uri);
+        final code = tryParseAuthorizationCodeFromString(raw);
         if (code != null) completer.complete(code);
       } on ConnectAuthException catch (e) {
         // Only errors for this attempt's state (e.g. access_denied) fail the wait.
@@ -605,10 +684,10 @@ class ConnectPersonaAuth {
     }
 
     if (includeInitialLink) {
-      apply(await _appLinks.getInitialLink());
+      apply(await _appLinks.getInitialLinkString());
     }
     if (!completer.isCompleted) {
-      apply(await _appLinks.getLatestLink());
+      apply(await _appLinks.getLatestLinkString());
     }
   }
 
@@ -618,12 +697,18 @@ class ConnectPersonaAuth {
   /// attempt (missing/wrong `state` while [_expectedState] is set). Throws
   /// [ConnectAuthException] only for terminal outcomes of *this* attempt
   /// (matching `state` with `error`, empty code, etc.).
-  String? tryParseAuthorizationCode(Uri uri) {
-    if (!_redirectUriMatches(uri)) {
+  String? tryParseAuthorizationCode(Uri uri) =>
+      tryParseAuthorizationCodeFromString(uri.toString());
+
+  /// Same as [tryParseAuthorizationCode] for raw deep-link strings (supports
+  /// schemes that [Uri] cannot represent, e.g. `client_…`).
+  String? tryParseAuthorizationCodeFromString(String raw) {
+    final link = _CallbackLink.tryParse(raw);
+    if (link == null || !_redirectLinkMatches(link)) {
       return null;
     }
 
-    final returnedState = uri.queryParameters['state'];
+    final returnedState = link.queryParameters['state'];
     final expected = _expectedState;
 
     // While sign-in is active, accept only this attempt's state. Stale or
@@ -633,23 +718,28 @@ class ConnectPersonaAuth {
             returnedState.isEmpty ||
             returnedState != expected)) {
       _log(
-        'Ignoring redirect (expected state=$expected, got=$returnedState, uri=$uri)',
+        'Ignoring redirect (expected state=$expected, got=$returnedState, uri=$raw)',
       );
       return null;
     }
 
-    return parseAuthorizationCode(uri);
+    return parseAuthorizationCodeFromString(raw);
   }
 
-  String parseAuthorizationCode(Uri uri) {
-    if (!_redirectUriMatches(uri)) {
+  String parseAuthorizationCode(Uri uri) =>
+      parseAuthorizationCodeFromString(uri.toString());
+
+  /// Same as [parseAuthorizationCode] for raw deep-link strings.
+  String parseAuthorizationCodeFromString(String raw) {
+    final link = _CallbackLink.tryParse(raw);
+    if (link == null || !_redirectLinkMatches(link)) {
       throw const ConnectAuthException(
         ConnectAuthException.invalidResponse,
-        'Redirect URI did not match the SDK redirectUri',
+        'Redirect URI did not match the expected redirectUri',
       );
     }
 
-    final params = uri.queryParameters;
+    final params = link.queryParameters;
     final error = params['error'];
     if (error != null) {
       throw ConnectAuthException(
@@ -692,16 +782,11 @@ class ConnectPersonaAuth {
     }
   }
 
-  bool _redirectUriMatches(Uri uri) {
-    final expected = _parsedRedirectUri;
-    if (uri.scheme != expected.scheme || uri.host != expected.host) {
-      return false;
-    }
-    if (expected.path.isNotEmpty && expected.path != '/') {
-      return uri.path == expected.path;
-    }
-    return true;
-  }
+  bool _redirectLinkMatches(_CallbackLink link) => link.matchesRedirect(
+    scheme: _redirectScheme,
+    host: _redirectHost,
+    path: _redirectPath,
+  );
 
   static String _generateState() {
     final random = Random.secure();

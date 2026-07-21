@@ -1,3 +1,12 @@
+## 0.4.0
+
+* **Breaking:** redirect URI is derived from host `clientId` as
+  `{clientId}://oauth/callback` (`ConnectPersonaAuth.redirectUriForClientId`).
+  Removed fixed `ConnectPersonaAuth.sdkRedirectUri`.
+* `recoverAuthorizationCode` now requires `clientId`.
+* Deep-link handling uses string APIs so schemes with `_` (e.g. `client_…`)
+  work (Dart `Uri` rejects those schemes).
+
 ## 0.3.1
 
 * Fix native `state_mismatch` on resume: ignore stale `getInitialLink` callbacks

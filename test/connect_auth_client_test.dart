@@ -6,7 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-final _redirectUri = ConnectPersonaAuth.sdkRedirectUri;
+const _clientId = 'client_test';
+final _redirectUri = ConnectPersonaAuth.redirectUriForClientId(_clientId);
 
 String _redirectWithCode(String code, {String? state}) {
   final query = state == null ? 'code=$code' : 'code=$code&state=$state';
@@ -17,21 +18,30 @@ class FakeAppLinksPlatform extends AppLinksPlatform {
   FakeAppLinksPlatform({
     this.initialLink,
     this.latestLink,
-    Stream<Uri>? uriLinkStream,
-  }) : _uriLinkStream = uriLinkStream ?? const Stream.empty();
+    Stream<String>? stringLinkStream,
+  }) : _stringLinkStream = stringLinkStream ?? const Stream.empty();
 
-  Uri? initialLink;
-  Uri? latestLink;
-  final Stream<Uri> _uriLinkStream;
-
-  @override
-  Future<Uri?> getInitialLink() async => initialLink;
+  String? initialLink;
+  String? latestLink;
+  final Stream<String> _stringLinkStream;
 
   @override
-  Future<Uri?> getLatestLink() async => latestLink;
+  Future<String?> getInitialLinkString() async => initialLink;
 
   @override
-  Stream<Uri> get uriLinkStream => _uriLinkStream;
+  Future<String?> getLatestLinkString() async => latestLink;
+
+  @override
+  Stream<String> get stringLinkStream => _stringLinkStream;
+
+  @override
+  Future<Uri?> getInitialLink() async => null;
+
+  @override
+  Future<Uri?> getLatestLink() async => null;
+
+  @override
+  Stream<Uri> get uriLinkStream => const Stream.empty();
 }
 
 void main() {
@@ -59,7 +69,7 @@ void main() {
     WebAuthorizeOpener? webAuthorizeOpener,
   }) {
     return ConnectPersonaAuth(
-      clientId: 'client_test',
+      clientId: _clientId,
       environment: environment,
       webAuthorizeBaseUrl: webAuthorizeBaseUrl,
       appLinks: appLinks,
@@ -84,7 +94,7 @@ void main() {
     test('throws for empty scope', () {
       expect(
         () => ConnectPersonaAuth(
-          clientId: 'client_test',
+          clientId: _clientId,
           environment: ConnectEnvironment.dev,
           scope: '',
         ),
@@ -92,13 +102,13 @@ void main() {
       );
     });
 
-    test('uses fixed SDK redirect URI', () {
+    test('derives redirect URI from clientId', () {
       final auth = ConnectPersonaAuth(
-        clientId: 'client_test',
+        clientId: _clientId,
         environment: ConnectEnvironment.dev,
         scope: 'profile.basic email',
       );
-      expect(auth.redirectUri, ConnectPersonaAuth.sdkRedirectUri);
+      expect(auth.redirectUri, '$_clientId://oauth/callback');
       expect(auth.scope, 'profile.basic email');
     });
   });
@@ -138,7 +148,7 @@ void main() {
       expect(uri.scheme, 'https');
       expect(uri.host, 'dev.connectpersona.com');
       expect(uri.path, '/api/v1/oauth/authorize');
-      expect(uri.queryParameters['client_id'], 'client_test');
+      expect(uri.queryParameters['client_id'], _clientId);
       expect(uri.queryParameters['redirect_uri'], _redirectUri);
       expect(uri.queryParameters['scope'], 'profile.basic');
       expect(uri.queryParameters['response_type'], 'code');
@@ -161,7 +171,7 @@ void main() {
       expect(uri.host, 'custom.example.com');
       expect(uri.queryParameters['foo'], '1');
       expect(uri.queryParameters['role'], 'I');
-      expect(uri.queryParameters['client_id'], 'client_test');
+      expect(uri.queryParameters['client_id'], _clientId);
     });
 
     test('ignores reserved oauth keys in webQueryParams', () {
@@ -178,7 +188,7 @@ void main() {
         state: 'real-state',
       );
 
-      expect(uri.queryParameters['client_id'], 'client_test');
+      expect(uri.queryParameters['client_id'], _clientId);
       expect(uri.queryParameters['redirect_uri'], _redirectUri);
       expect(uri.queryParameters['response_type'], 'code');
       expect(uri.queryParameters['scope'], 'profile.basic');
@@ -191,7 +201,7 @@ void main() {
     test('uses app path when launch succeeds (no web fallback)', () async {
       var webOpened = false;
       final shortAuth = ConnectPersonaAuth(
-        clientId: 'client_test',
+        clientId: _clientId,
         environment: ConnectEnvironment.dev,
         signInTimeout: const Duration(milliseconds: 80),
         canLaunchUrlFn: (_) async => true,
@@ -250,7 +260,7 @@ void main() {
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async => false,
         webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
           openedUrl = url;
-          expect(scheme, Uri.parse(ConnectPersonaAuth.sdkRedirectUri).scheme);
+          expect(scheme, _clientId);
           expect(httpsHost, isNull);
           expect(httpsPath, isNull);
           return _redirectWithCode(
@@ -437,9 +447,9 @@ void main() {
     });
 
     test('resolves deep link delivered after resume without cancelling', () async {
-      final linkController = StreamController<Uri>.broadcast();
+      final linkController = StreamController<String>.broadcast();
       final fakePlatform = FakeAppLinksPlatform(
-        uriLinkStream: linkController.stream,
+        stringLinkStream: linkController.stream,
       );
       AppLinksPlatform.instance = fakePlatform;
       String? capturedState;
@@ -465,7 +475,7 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 700));
       linkController.add(
-        Uri.parse(_redirectWithCode('delayed-code', state: capturedState)),
+        _redirectWithCode('delayed-code', state: capturedState),
       );
 
       expect(await signInFuture, 'delayed-code');
@@ -474,12 +484,10 @@ void main() {
     });
 
     test('ignores stale redirect with wrong state then accepts matching', () async {
-      final linkController = StreamController<Uri>.broadcast();
+      final linkController = StreamController<String>.broadcast();
       final fakePlatform = FakeAppLinksPlatform(
-        initialLink: Uri.parse(
-          _redirectWithCode('stale-code', state: 'old-state'),
-        ),
-        uriLinkStream: linkController.stream,
+        initialLink: _redirectWithCode('stale-code', state: 'old-state'),
+        stringLinkStream: linkController.stream,
       );
       AppLinksPlatform.instance = fakePlatform;
       String? capturedState;
@@ -501,12 +509,12 @@ void main() {
 
       // Stale callback (wrong state) must not complete with state_mismatch.
       linkController.add(
-        Uri.parse(_redirectWithCode('stale-code', state: 'old-state')),
+        _redirectWithCode('stale-code', state: 'old-state'),
       );
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       linkController.add(
-        Uri.parse(_redirectWithCode('fresh-code', state: capturedState)),
+        _redirectWithCode('fresh-code', state: capturedState),
       );
 
       expect(await signInFuture, 'fresh-code');
@@ -515,10 +523,10 @@ void main() {
     });
 
     test('ignores stale redirect missing state then accepts matching', () async {
-      final linkController = StreamController<Uri>.broadcast();
+      final linkController = StreamController<String>.broadcast();
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        latestLink: Uri.parse('$_redirectUri?code=stale-no-state'),
-        uriLinkStream: linkController.stream,
+        latestLink: '$_redirectUri?code=stale-no-state',
+        stringLinkStream: linkController.stream,
       );
       String? capturedState;
 
@@ -538,7 +546,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Missing state must not fail the session with state_mismatch.
-      linkController.add(Uri.parse('$_redirectUri?code=stale-no-state'));
+      linkController.add('$_redirectUri?code=stale-no-state');
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
@@ -547,7 +555,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 400));
 
       linkController.add(
-        Uri.parse(_redirectWithCode('fresh-code', state: capturedState)),
+        _redirectWithCode('fresh-code', state: capturedState),
       );
 
       expect(await signInFuture, 'fresh-code');
@@ -559,16 +567,16 @@ void main() {
   group('parseAuthorizationCode', () {
     test('returns code for matching redirect', () {
       final auth = buildAuth();
-      final code = auth.parseAuthorizationCode(
-        Uri.parse('$_redirectUri?code=xyz'),
+      final code = auth.parseAuthorizationCodeFromString(
+        '$_redirectUri?code=xyz',
       );
       expect(code, 'xyz');
     });
 
     test('tryParse ignores wrong state while sign-in expects another', () async {
-      final linkController = StreamController<Uri>.broadcast();
+      final linkController = StreamController<String>.broadcast();
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        uriLinkStream: linkController.stream,
+        stringLinkStream: linkController.stream,
       );
       String? capturedState;
       final auth = buildAuth(
@@ -588,20 +596,20 @@ void main() {
       expect(capturedState, isNotEmpty);
 
       expect(
-        auth.tryParseAuthorizationCode(
-          Uri.parse('$_redirectUri?code=x&state=other'),
+        auth.tryParseAuthorizationCodeFromString(
+          '$_redirectUri?code=x&state=other',
         ),
         isNull,
       );
       expect(
-        auth.tryParseAuthorizationCode(
-          Uri.parse('$_redirectUri?code=x'),
+        auth.tryParseAuthorizationCodeFromString(
+          '$_redirectUri?code=x',
         ),
         isNull,
       );
 
       linkController.add(
-        Uri.parse(_redirectWithCode('ok', state: capturedState)),
+        _redirectWithCode('ok', state: capturedState),
       );
       expect(await future, 'ok');
       await linkController.close();
@@ -611,8 +619,8 @@ void main() {
     test('maps access_denied', () {
       final auth = buildAuth();
       expect(
-        () => auth.parseAuthorizationCode(
-          Uri.parse('$_redirectUri?error=access_denied'),
+        () => auth.parseAuthorizationCodeFromString(
+          '$_redirectUri?error=access_denied',
         ),
         throwsA(
           isA<ConnectAuthException>().having(
@@ -627,8 +635,8 @@ void main() {
     test('rejects redirect with wrong path', () {
       final auth = buildAuth();
       expect(
-        auth.tryParseAuthorizationCode(
-          Uri.parse('loginwithconnect://oauth/other?code=xyz'),
+        auth.tryParseAuthorizationCodeFromString(
+          'loginwithconnect://oauth/other?code=xyz',
         ),
         isNull,
       );
@@ -643,36 +651,32 @@ void main() {
     test('returns null when no persisted state', () async {
       await ConnectPersonaAuth.debugSetPersistedOAuthState(null);
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        initialLink: Uri.parse(_redirectWithCode('x', state: 's')),
+        initialLink: _redirectWithCode('x', state: 's'),
       );
-      expect(await ConnectPersonaAuth.recoverAuthorizationCode(), isNull);
+      expect(await ConnectPersonaAuth.recoverAuthorizationCode(clientId: _clientId), isNull);
     });
 
     test('recovers code when initial link matches persisted state', () async {
       const state = 'cold-start-state';
       await ConnectPersonaAuth.debugSetPersistedOAuthState(state);
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        initialLink: Uri.parse(
-          _redirectWithCode('recovered-code', state: state),
-        ),
+        initialLink: _redirectWithCode('recovered-code', state: state),
       );
 
       expect(
-        await ConnectPersonaAuth.recoverAuthorizationCode(),
+        await ConnectPersonaAuth.recoverAuthorizationCode(clientId: _clientId),
         'recovered-code',
       );
       // Persisted state cleared after success.
-      expect(await ConnectPersonaAuth.recoverAuthorizationCode(), isNull);
+      expect(await ConnectPersonaAuth.recoverAuthorizationCode(clientId: _clientId), isNull);
     });
 
     test('ignores initial link when state does not match', () async {
       await ConnectPersonaAuth.debugSetPersistedOAuthState('expected');
       AppLinksPlatform.instance = FakeAppLinksPlatform(
-        initialLink: Uri.parse(
-          _redirectWithCode('nope', state: 'other'),
-        ),
+        initialLink: _redirectWithCode('nope', state: 'other'),
       );
-      expect(await ConnectPersonaAuth.recoverAuthorizationCode(), isNull);
+      expect(await ConnectPersonaAuth.recoverAuthorizationCode(clientId: _clientId), isNull);
     });
   });
 }
