@@ -131,6 +131,8 @@ class ConnectPersonaAuth {
   /// Recovers an authorization code after the host process was killed while
   /// Connect was open (cold start via deep link).
   ///
+  ///Call from host `initState` / startup. Returns `null` when there is no
+  /// matching pending redirect. Clears the persisted OAuth `state` on success.
   ///
   /// Requires that [signIn] had started earlier (state was persisted).
   static Future<String?> recoverAuthorizationCode({
