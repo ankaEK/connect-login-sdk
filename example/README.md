@@ -8,8 +8,8 @@ pattern documented in the [root README](../README.md).
 - `ConnectPersonaAuth.signIn` with app → web fallback callbacks
 - Display of the OAuth authorization code on success
 - Sample backend token-exchange `curl` (secret redacted)
-- Cold-start recovery via `ConnectPersonaAuth.recoverAuthorizationCode()`
-- Android / iOS deep links for `loginwithconnect://oauth/callback`
+- Cold-start recovery via `ConnectPersonaAuth.recoverAuthorizationCode(clientId: …)`
+- Android / iOS deep links for `{clientId}://oauth/callback`
 - Android package visibility / iOS `LSApplicationQueriesSchemes` for
   `connectpersona://`
 
@@ -21,11 +21,12 @@ pattern documented in the [root README](../README.md).
 3. On that portal client, register:
 
    ```text
-   loginwithconnect://oauth/callback
+   {kClientId}://oauth/callback
    ```
 
-   (`ConnectPersonaAuth.sdkRedirectUri` — already wired in this example’s
-   Android and iOS config.)
+   Use a scheme-safe client id (e.g. `cp-…`, no `_`).
+   (`ConnectPersonaAuth.redirectUriForClientId(kClientId)` — already wired in
+   this example’s Android and iOS config.)
 
 4. The demo defaults to `ConnectEnvironment.dev`
    (`https://dev.connectpersona.com`). Change `environment:` in

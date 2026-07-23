@@ -12,12 +12,13 @@ and user profile.
 | **Package** | `login_with_connect` |
 | **Platforms** | Android, iOS |
 | **Auth style** | OAuth 2.0 authorization code |
-| **Redirect URI** | Fixed by the SDK (see below) |
+| **Redirect URI** | Derived from `clientId`: `{clientId}://oauth/callback` |
 | **Portal** | [developers.connectpersona.com](https://developers.connectpersona.com/) |
 
 ## Overview
 
-1. Host app creates a Connect OAuth client and registers the SDK redirect URI.
+1. Host app creates a Connect OAuth client and registers a redirect URI derived
+   from its client ID (`{clientId}://oauth/callback`).
 2. Host wires Android / iOS deep links for that URI.
 3. Host calls `ConnectPersonaAuth.signIn(...)`.
 4. SDK opens Connect (app → web fallback) and returns an authorization `code`.
@@ -36,7 +37,7 @@ and user profile.
                     │                      │                      │
                     └──────────┬───────────┘                      │
                                ▼                                  │
-                    loginwithconnect://oauth/callback             │
+                    {clientId}://oauth/callback                       │
                                │                                  │
                                ▼                                  │
                          authorization code  ◄────────────────────┘
@@ -50,7 +51,7 @@ and user profile.
 - Flutter **3.32+** / Dart **3.8+**
 - A Connect Persona OAuth client from the
   [developer portal](https://developers.connectpersona.com/)
-- Android and/or iOS project with deep-link support for the SDK redirect URI
+- Android and/or iOS project with deep-link support for your redirect URI
 
 ## Installation
 
@@ -83,20 +84,24 @@ flutter pub get
 1. Open the [Connect developer portal](https://developers.connectpersona.com/).
 2. Create or select an OAuth client for the target environment
    (`dev` / `uat` / `prod`).
-3. Register this **exact** redirect URI (owned by the SDK — not configurable):
+3. Register this **exact** redirect URI (derived from your client ID):
 
    ```text
-   loginwithconnect://oauth/callback
+   {clientId}://oauth/callback
    ```
 
-   Constant: `ConnectPersonaAuth.sdkRedirectUri`.
+   Example: if `clientId` is `cp-6d009906-…`, register
+   `cp-6d009906-…://oauth/callback`.
+
+   [clientId] must be a valid URI scheme (letters, digits, `+`, `-`, `.`;
+   no `_`). Helper: `ConnectPersonaAuth.redirectUriForClientId(clientId)`.
 
 4. Note your **Client ID**. Keep **Client Secret** on the server only.
 5. Enable the scopes your app will request (for example `profile.basic`).
 
 ## Platform setup
 
-Deep links must match `loginwithconnect://oauth/callback`. Also declare the
+Deep links must match the redirect URI for your `clientId`. Also declare the
 Connect app scheme so Android / iOS can detect and launch it.
 
 ### Android
@@ -104,7 +109,8 @@ Connect app scheme so Android / iOS can detect and launch it.
 In `android/app/src/main/AndroidManifest.xml`:
 
 1. Add an intent filter on your main activity (use `singleTop` or equivalent so
-   redirects resume the same task):
+   redirects resume the same task). Replace `YOUR_CLIENT_ID` with the same
+   value you pass as `clientId`:
 
 ```xml
 <intent-filter>
@@ -112,7 +118,7 @@ In `android/app/src/main/AndroidManifest.xml`:
     <category android:name="android.intent.category.DEFAULT"/>
     <category android:name="android.intent.category.BROWSABLE"/>
     <data
-        android:scheme="loginwithconnect"
+        android:scheme="YOUR_CLIENT_ID"
         android:host="oauth"
         android:pathPrefix="/callback"/>
 </intent-filter>
@@ -137,7 +143,7 @@ See the complete file in
 
 In `ios/Runner/Info.plist`:
 
-1. Register the SDK URL scheme:
+1. Register the same redirect scheme:
 
 ```xml
 <key>CFBundleURLTypes</key>
@@ -149,7 +155,7 @@ In `ios/Runner/Info.plist`:
     <string>com.example.yourapp.oauth</string>
     <key>CFBundleURLSchemes</key>
     <array>
-      <string>loginwithconnect</string>
+      <string>YOUR_CLIENT_ID</string>
     </array>
   </dict>
 </array>
@@ -221,7 +227,9 @@ void initState() {
 
 Future<void> _recover() async {
   try {
-    final code = await ConnectPersonaAuth.recoverAuthorizationCode();
+    final code = await ConnectPersonaAuth.recoverAuthorizationCode(
+      clientId: 'your-client-id',
+    );
     if (code == null) return;
     // Same as a successful signIn — send `code` to your backend.
   } on ConnectAuthException catch (e) {
@@ -333,8 +341,7 @@ The [`example/`](example/) app is a minimal host integration:
 
 1. Set `kClientId` (and optionally `kScope`) in
    [`example/lib/main.dart`](example/lib/main.dart).
-2. Ensure the portal client has redirect
-   `loginwithconnect://oauth/callback`.
+2. Ensure the portal client has redirect `{clientId}://oauth/callback`.
 3. Run:
 
 ```bash
@@ -344,8 +351,8 @@ flutter run
 ```
 
 On success, the demo shows the authorization code and a sample token-exchange
-`curl` for backend testing. It also calls `recoverAuthorizationCode()` on
-startup for Android process-death recovery.
+`curl` for backend testing. It also calls `recoverAuthorizationCode(clientId: …)`
+on startup for Android process-death recovery.
 
 > **Note:** The example disables Impeller on Android
 > (`io.flutter.embedding.android.EnableImpeller` = `false`) to avoid a black

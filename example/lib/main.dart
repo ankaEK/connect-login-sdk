@@ -43,7 +43,9 @@ class _SignInDemoState extends State<SignInDemo> {
   /// restart loses the in-flight [signIn] Future — recover the code here.
   Future<void> _recoverFromColdStart() async {
     try {
-      final code = await ConnectPersonaAuth.recoverAuthorizationCode();
+      final code = await ConnectPersonaAuth.recoverAuthorizationCode(
+        clientId: kClientId,
+      );
       if (!mounted || code == null) return;
       setState(() {
         _authCode = code;
