@@ -122,11 +122,12 @@ class ConnectPersonaAuth {
   }
 
   /// OAuth redirect URI for [clientId]: `{clientId}://oauth/callback`.
-  
   /// Register this exact value on the Connect portal client, and wire the same
   /// scheme/host/path in the host app's Android/iOS deep-link config.
-  static String redirectUriForClientId(String clientId) =>
-      '$clientId://$_redirectHost$_redirectPath';
+  static String redirectUriForClientId(String clientId) {
+    final scheme = clientId.replaceAll('_', '-');
+    return '$scheme://$_redirectHost$_redirectPath';
+  }
 
   /// Recovers an authorization code after the host process was killed while
   /// Connect was open (cold start via deep link).
