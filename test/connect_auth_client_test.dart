@@ -140,19 +140,19 @@ void main() {
     });
 
     test('connectAppScheme is environment-specific', () {
-      expect(ConnectEnvironment.dev.connectAppScheme, 'connectpersona-dev');
-      expect(ConnectEnvironment.uat.connectAppScheme, 'connectpersona-uat');
+      expect(ConnectEnvironment.dev.connectAppScheme, 'connectpersona.dev');
+      expect(ConnectEnvironment.uat.connectAppScheme, 'connectpersona.stg');
       expect(ConnectEnvironment.prod.connectAppScheme, 'connectpersona');
     });
 
     test('connectAppAuthorizeUri uses env scheme', () {
       expect(
         ConnectEnvironment.dev.connectAppAuthorizeUri.toString(),
-        'connectpersona-dev://oauth/authorize',
+        'connectpersona.dev://oauth/authorize',
       );
       expect(
         ConnectEnvironment.uat.connectAppAuthorizeUri.toString(),
-        'connectpersona-uat://oauth/authorize',
+        'connectpersona.stg://oauth/authorize',
       );
       expect(
         ConnectEnvironment.prod.connectAppAuthorizeUri.toString(),
@@ -230,7 +230,7 @@ void main() {
         signInTimeout: const Duration(milliseconds: 80),
         canLaunchUrlFn: (_) async => true,
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
-          expect(uri.scheme, 'connectpersona-dev');
+          expect(uri.scheme, 'connectpersona.dev');
           expect(uri.host, 'oauth');
           expect(uri.path, '/authorize');
           expect(uri.queryParameters['role'], 'O');
@@ -301,8 +301,8 @@ void main() {
 
       final code = await auth.signIn();
       expect(code, 'uat-web');
-      expect(launched?.scheme, 'connectpersona-uat');
-      expect(auth.resolvedConnectAppScheme, 'connectpersona-uat');
+      expect(launched?.scheme, 'connectpersona.stg');
+      expect(auth.resolvedConnectAppScheme, 'connectpersona.stg');
       await auth.dispose();
     });
 

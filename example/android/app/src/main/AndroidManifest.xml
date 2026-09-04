@@ -51,11 +51,11 @@
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="connectpersona-uat"/>
+            <data android:scheme="connectpersona.stg"/>
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="connectpersona-dev"/>
+            <data android:scheme="connectpersona.dev"/>
         </intent>
     </queries>
 </manifest>

@@ -24,8 +24,8 @@
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>connectpersona</string>
-		<string>connectpersona-uat</string>
-		<string>connectpersona-dev</string>
+		<string>connectpersona.stg</string>
+		<string>connectpersona.dev</string>
 	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>

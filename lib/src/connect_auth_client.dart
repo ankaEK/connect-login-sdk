@@ -237,7 +237,7 @@ class ConnectPersonaAuth {
 
   /// Optional override for the Connect Persona app URL scheme.
   /// When set, wins over [environment.connectAppScheme].
-  /// Defaults: `connectpersona-dev` / `connectpersona-uat` / `connectpersona`.
+  /// Defaults: `connectpersona.dev` / `connectpersona.stg` / `connectpersona`.
   final String? connectAppScheme;
 
   final Duration signInTimeout;

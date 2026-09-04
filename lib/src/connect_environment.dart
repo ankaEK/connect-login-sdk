@@ -25,9 +25,9 @@ enum ConnectEnvironment {
   String get connectAppScheme {
     switch (this) {
       case ConnectEnvironment.dev:
-        return 'connectpersona-dev';
+        return 'connectpersona.dev';
       case ConnectEnvironment.uat:
-        return 'connectpersona-uat';
+        return 'connectpersona.stg';
       case ConnectEnvironment.prod:
         return 'connectpersona';
     }
