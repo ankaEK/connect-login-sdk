@@ -88,6 +88,7 @@ class ConnectPersonaAuth {
     required this.environment,
     this.scope = 'profile.basic',
     this.webAuthorizeBaseUrl,
+    this.connectAppScheme,
     this.signInTimeout = const Duration(minutes: 5),
     this.launchHandoffTimeout = const Duration(milliseconds: 1200),
     AppLinks? appLinks,
@@ -234,6 +235,11 @@ class ConnectPersonaAuth {
   /// When set, wins over [environment.authorizeBaseUri].
   final String? webAuthorizeBaseUrl;
 
+  /// Optional override for the Connect Persona app URL scheme.
+  /// When set, wins over [environment.connectAppScheme].
+  /// Defaults: `connectpersona-dev` / `connectpersona-uat` / `connectpersona`.
+  final String? connectAppScheme;
+
   final Duration signInTimeout;
 
   /// How long to wait after launchUrl for the host to background (Connect opened).
@@ -258,6 +264,20 @@ class ConnectPersonaAuth {
     }
     return environment.authorizeBaseUri;
   }
+
+  String get resolvedConnectAppScheme {
+    final override = connectAppScheme;
+    if (override != null && override.isNotEmpty) {
+      return override;
+    }
+    return environment.connectAppScheme;
+  }
+
+  Uri get resolvedConnectAppAuthorizeUri => Uri(
+    scheme: resolvedConnectAppScheme,
+    host: 'oauth',
+    path: '/authorize',
+  );
 
   Uri buildWebAuthorizeUri({
     Uri? webAuthorizeUrl,
@@ -320,7 +340,8 @@ class ConnectPersonaAuth {
       }
 
       if (!launched) {
-        const reason = 'launchUrl failed for connectpersona://';
+        final reason =
+            'launchUrl failed for ${resolvedConnectAppScheme}://';
         _log(reason);
         onAppLaunchFailed?.call(reason);
         return false;
@@ -557,7 +578,7 @@ class ConnectPersonaAuth {
     Map<String, String>? webQueryParams,
   }) {
     return _buildAuthorizeUri(
-      base: Uri.parse('connectpersona://oauth/authorize'),
+      base: resolvedConnectAppAuthorizeUri,
       state: state,
       webQueryParams: webQueryParams,
     );

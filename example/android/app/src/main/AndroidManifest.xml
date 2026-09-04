@@ -44,10 +44,18 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <!-- Allow launching Connect Persona app (Android 11+ package visibility) -->
+        <!-- Allow launching Connect Persona app builds (Android 11+ package visibility) -->
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="connectpersona"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="connectpersona-uat"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="connectpersona-dev"/>
         </intent>
     </queries>
 </manifest>
