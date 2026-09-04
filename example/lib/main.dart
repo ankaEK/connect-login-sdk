@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:login_with_connect/login_with_connect.dart';
 
-/// Replace with your Connect Persona OAuth client ID (from the developer portal).
-/// https://developers.connectpersona.com/
-const String kClientId = 'e48a3e01-8481-4cad-8dc0-f97f19004dc6';
+import 'app_flavor.dart';
 
 /// Host-supplied OAuth scope. Register matching scopes on the portal client.
 /// Multiple scopes separated by spaces.
 const String kScope = 'profile.basic';
+
+final AppFlavor kFlavor = AppFlavor.current;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,7 +44,7 @@ class _SignInDemoState extends State<SignInDemo> {
   Future<void> _recoverFromColdStart() async {
     try {
       final code = await ConnectPersonaAuth.recoverAuthorizationCode(
-        clientId: kClientId,
+        clientId: kFlavor.clientId,
       );
       if (!mounted || code == null) return;
       setState(() {
@@ -75,7 +75,7 @@ curl -X 'POST' \\
   -H 'accept: application/json' \\
   -H 'Content-Type: application/json' \\
   -d '{
-  "client_id": "$kClientId",
+  "client_id": "${kFlavor.clientId}",
   "client_secret": "*****",
   "code": "$code"
 }'
@@ -136,9 +136,9 @@ curl -X 'POST' \\
     });
 
     final auth = ConnectPersonaAuth(
-      clientId: kClientId,
+      clientId: kFlavor.clientId,
       scope: kScope,
-      environment: ConnectEnvironment.dev,
+      environment: kFlavor.connectEnvironment,
     );
 
     try {
