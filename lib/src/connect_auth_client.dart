@@ -235,9 +235,6 @@ class ConnectPersonaAuth {
   /// When set, wins over [environment.authorizeBaseUri].
   final String? webAuthorizeBaseUrl;
 
-  /// Optional override for the Connect Persona app URL scheme.
-  /// When set, wins over [environment.connectAppScheme].
-  /// Defaults: `connectpersona.dev` / `connectpersona.stg` / `connectpersona`.
   final String? connectAppScheme;
 
   final Duration signInTimeout;
