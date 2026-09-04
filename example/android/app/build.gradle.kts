@@ -30,10 +30,8 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // OAuth redirect scheme = portal clientId (must match Dart AppFlavor.clientId).
         manifestPlaceholders["oauthRedirectScheme"] =
             "e48a3e01-8481-4cad-8dc0-f97f19004dc6"
-        // Connect app scheme for this flavor (must match Connect deepLinkScheme).
         manifestPlaceholders["connectAppScheme"] = "connectpersona.dev"
     }
 
