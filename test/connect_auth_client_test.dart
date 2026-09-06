@@ -63,6 +63,7 @@ void main() {
   ConnectPersonaAuth buildAuth({
     ConnectEnvironment environment = ConnectEnvironment.dev,
     String? webAuthorizeBaseUrl,
+    String? connectAppScheme,
     AppLinks? appLinks,
     Future<bool> Function(Uri uri, {LaunchMode mode})? launchUrlFn,
     Future<bool> Function(Uri uri)? canLaunchUrlFn,
@@ -73,6 +74,7 @@ void main() {
       clientId: _clientId,
       environment: environment,
       webAuthorizeBaseUrl: webAuthorizeBaseUrl,
+      connectAppScheme: connectAppScheme,
       appLinks: appLinks,
       launchUrlFn: launchUrlFn,
       canLaunchUrlFn: canLaunchUrlFn ?? ((_) async => true),
@@ -134,6 +136,27 @@ void main() {
       expect(
         ConnectEnvironment.dev.authorizeBaseUri.toString(),
         'https://dev.connectpersona.com/api/v1/oauth/authorize',
+      );
+    });
+
+    test('connectAppScheme is environment-specific', () {
+      expect(ConnectEnvironment.dev.connectAppScheme, 'connectpersona.dev');
+      expect(ConnectEnvironment.uat.connectAppScheme, 'connectpersona.stg');
+      expect(ConnectEnvironment.prod.connectAppScheme, 'connectpersona');
+    });
+
+    test('connectAppAuthorizeUri uses env scheme', () {
+      expect(
+        ConnectEnvironment.dev.connectAppAuthorizeUri.toString(),
+        'connectpersona.dev://oauth/authorize',
+      );
+      expect(
+        ConnectEnvironment.uat.connectAppAuthorizeUri.toString(),
+        'connectpersona.stg://oauth/authorize',
+      );
+      expect(
+        ConnectEnvironment.prod.connectAppAuthorizeUri.toString(),
+        'connectpersona://oauth/authorize',
       );
     });
   });
@@ -207,7 +230,9 @@ void main() {
         signInTimeout: const Duration(milliseconds: 80),
         canLaunchUrlFn: (_) async => true,
         launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
-          expect(uri.scheme, 'connectpersona');
+          expect(uri.scheme, 'connectpersona.dev');
+          expect(uri.host, 'oauth');
+          expect(uri.path, '/authorize');
           expect(uri.queryParameters['role'], 'O');
           expect(uri.queryParameters['state'], isNotEmpty);
           return true;
@@ -231,6 +256,79 @@ void main() {
       );
       expect(webOpened, isFalse);
       await shortAuth.dispose();
+    });
+
+    test('uses prod Connect app scheme for prod environment', () async {
+      Uri? launched;
+      final auth = buildAuth(
+        environment: ConnectEnvironment.prod,
+        canLaunchUrlFn: (_) async => true,
+        launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
+          launched = uri;
+          return false;
+        },
+        webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
+          return _redirectWithCode(
+            'prod-web',
+            state: url.queryParameters['state'],
+          );
+        },
+      );
+
+      final code = await auth.signIn();
+      expect(code, 'prod-web');
+      expect(launched?.scheme, 'connectpersona');
+      expect(auth.resolvedConnectAppScheme, 'connectpersona');
+      await auth.dispose();
+    });
+
+    test('uses uat Connect app scheme for uat environment', () async {
+      Uri? launched;
+      final auth = buildAuth(
+        environment: ConnectEnvironment.uat,
+        canLaunchUrlFn: (_) async => true,
+        launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
+          launched = uri;
+          return false;
+        },
+        webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
+          return _redirectWithCode(
+            'uat-web',
+            state: url.queryParameters['state'],
+          );
+        },
+      );
+
+      final code = await auth.signIn();
+      expect(code, 'uat-web');
+      expect(launched?.scheme, 'connectpersona.stg');
+      expect(auth.resolvedConnectAppScheme, 'connectpersona.stg');
+      await auth.dispose();
+    });
+
+    test('connectAppScheme override wins over environment', () async {
+      Uri? launched;
+      final auth = buildAuth(
+        environment: ConnectEnvironment.prod,
+        connectAppScheme: 'custom-connect',
+        canLaunchUrlFn: (_) async => true,
+        launchUrlFn: (uri, {mode = LaunchMode.platformDefault}) async {
+          launched = uri;
+          return false;
+        },
+        webAuthorizeOpener: (url, scheme, {httpsHost, httpsPath}) async {
+          return _redirectWithCode(
+            'override-web',
+            state: url.queryParameters['state'],
+          );
+        },
+      );
+
+      final code = await auth.signIn();
+      expect(code, 'override-web');
+      expect(launched?.scheme, 'custom-connect');
+      expect(auth.resolvedConnectAppScheme, 'custom-connect');
+      await auth.dispose();
     });
 
     test('fake launch without background falls back to web', () async {

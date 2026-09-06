@@ -21,4 +21,18 @@ enum ConnectEnvironment {
 
   Uri get authorizeBaseUri =>
       Uri.parse('$authHost/api/v1/oauth/authorize');
+
+  String get connectAppScheme {
+    switch (this) {
+      case ConnectEnvironment.dev:
+        return 'connectpersona.dev';
+      case ConnectEnvironment.uat:
+        return 'connectpersona.stg';
+      case ConnectEnvironment.prod:
+        return 'connectpersona';
+    }
+  }
+
+  Uri get connectAppAuthorizeUri =>
+      Uri(scheme: connectAppScheme, host: 'oauth', path: '/authorize');
 }

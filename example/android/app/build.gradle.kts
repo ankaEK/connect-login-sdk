@@ -30,6 +30,33 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["oauthRedirectScheme"] =
+            "e48a3e01-8481-4cad-8dc0-f97f19004dc6"
+        manifestPlaceholders["connectAppScheme"] = "connectpersona.dev"
+    }
+
+    flavorDimensions += "default"
+    productFlavors {
+        create("dev") {
+            dimension = "default"
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["oauthRedirectScheme"] =
+                "e48a3e01-8481-4cad-8dc0-f97f19004dc6"
+            manifestPlaceholders["connectAppScheme"] = "connectpersona.dev"
+        }
+        create("stg") {
+            dimension = "default"
+            applicationIdSuffix = ".stg"
+            manifestPlaceholders["oauthRedirectScheme"] =
+                "e48a3e01-8481-4cad-8dc0-f97f19004dc6"
+            manifestPlaceholders["connectAppScheme"] = "connectpersona.stg"
+        }
+        create("prod") {
+            dimension = "default"
+            manifestPlaceholders["oauthRedirectScheme"] =
+                "e48a3e01-8481-4cad-8dc0-f97f19004dc6"
+            manifestPlaceholders["connectAppScheme"] = "connectpersona"
+        }
     }
 
     buildTypes {

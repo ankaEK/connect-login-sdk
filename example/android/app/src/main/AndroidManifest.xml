@@ -20,13 +20,13 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- Deep link for Connect OAuth redirect -->
+            <!-- OAuth redirect — scheme from flavor (oauthRedirectScheme = clientId) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data
-                    android:scheme="e48a3e01-8481-4cad-8dc0-f97f19004dc6"
+                    android:scheme="${oauthRedirectScheme}"
                     android:host="oauth"
                     android:pathPrefix="/callback"/>
             </intent-filter>
@@ -44,10 +44,10 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <!-- Allow launching Connect Persona app (Android 11+ package visibility) -->
+        <!-- Allow launching Connect for this flavor only (Android 11+ package visibility) -->
         <intent>
             <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="connectpersona"/>
+            <data android:scheme="${connectAppScheme}"/>
         </intent>
     </queries>
 </manifest>
