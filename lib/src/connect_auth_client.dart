@@ -86,6 +86,7 @@ class ConnectPersonaAuth {
   ConnectPersonaAuth({
     required this.clientId,
     required this.environment,
+    String? redirectUri,
     this.scope = 'profile.basic',
     this.webAuthorizeBaseUrl,
     this.connectAppScheme,
@@ -96,8 +97,8 @@ class ConnectPersonaAuth {
     Future<bool> Function(Uri uri)? canLaunchUrlFn,
     Future<bool> Function(Duration timeout)? waitForAppBackgroundFn,
     WebAuthorizeOpener? webAuthorizeOpener,
-  }) : redirectUri = _redirectUriOrThrow(clientId),
-       _parsedRedirectUri = Uri.parse(_redirectUriOrThrow(clientId)),
+  }) : redirectUri = _resolveRedirectUri(clientId, redirectUri),
+       _parsedRedirectUri = Uri.parse(_resolveRedirectUri(clientId, redirectUri)),
        _appLinks = appLinks ?? AppLinks(),
        _launchUrl =
            launchUrlFn ??
@@ -115,11 +116,22 @@ class ConnectPersonaAuth {
   static const String _redirectHost = 'oauth';
   static const String _redirectPath = '/callback';
 
-  static String _redirectUriOrThrow(String clientId) {
+  static String _resolveRedirectUri(String clientId, String? redirectUri) {
     if (clientId.isEmpty) {
       throw ArgumentError.value(clientId, 'clientId', 'must not be empty');
     }
-    return redirectUriForClientId(clientId);
+    if (redirectUri == null || redirectUri.isEmpty) {
+      return redirectUriForClientId(clientId);
+    }
+    final uri = Uri.tryParse(redirectUri);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      throw ArgumentError.value(
+        redirectUri,
+        'redirectUri',
+        'must be an absolute URI like myapp://oauth/callback',
+      );
+    }
+    return redirectUri;
   }
 
   /// OAuth redirect URI for [clientId]: `{clientId}://oauth/callback`.
@@ -139,6 +151,7 @@ class ConnectPersonaAuth {
   /// Requires that [signIn] had started earlier (state was persisted).
   static Future<String?> recoverAuthorizationCode({
     required String clientId,
+    String? redirectUri,
     AppLinks? appLinks,
   }) async {
     final expected = await _readPersistedOAuthState();
@@ -147,7 +160,7 @@ class ConnectPersonaAuth {
       return null;
     }
 
-    final expectedRedirect = Uri.parse(redirectUriForClientId(clientId));
+    final expectedRedirect = Uri.parse(_resolveRedirectUri(clientId, redirectUri));
     final links = appLinks ?? AppLinks();
     final candidates = <Uri?>[
       await links.getInitialLink(),
@@ -270,11 +283,8 @@ class ConnectPersonaAuth {
     return environment.connectAppScheme;
   }
 
-  Uri get resolvedConnectAppAuthorizeUri => Uri(
-    scheme: resolvedConnectAppScheme,
-    host: 'oauth',
-    path: '/authorize',
-  );
+  Uri get resolvedConnectAppAuthorizeUri =>
+      Uri(scheme: resolvedConnectAppScheme, host: 'oauth', path: '/authorize');
 
   Uri buildWebAuthorizeUri({
     Uri? webAuthorizeUrl,
@@ -337,8 +347,7 @@ class ConnectPersonaAuth {
       }
 
       if (!launched) {
-        final reason =
-            'launchUrl failed for ${resolvedConnectAppScheme}://';
+        final reason = 'launchUrl failed for ${resolvedConnectAppScheme}://';
         _log(reason);
         onAppLaunchFailed?.call(reason);
         return false;
